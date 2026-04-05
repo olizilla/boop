@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Google Fonts for pixel UI -->
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Boop</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <!-- The arcade machine physical frame -->
+    <div id="arcade-cabinet">
+      
+      <!-- The glass screen / dynamic UI area -->
+      <div id="screen" class="state-idle">
+        <div id="screen-glare"></div>
+        
+        <div id="header">
+          <div id="status-indicator" class="offline"></div>
+          <h1>BOOP</h1>
+        </div>
+        
+        <div id="content-area">
+          <div class="contact-info">
+            <span id="contact-emoji">👽</span>
+            <span id="contact-nickname">Nobody</span>
+          </div>
+          
+          <div id="message-status" class="hidden">
+            <span class="pulse">booping!</span>
+          </div>
+          
+          <!-- Views for special modes: Add friend, show ticket -->
+          <div id="view-add-friend" class="hidden">
+            <h2>Add Friend</h2>
+            <input type="text" id="input-nickname" placeholder="Nickname">
+            <textarea id="input-ticket" placeholder="Paste Endpoint ID..."></textarea>
+            <button id="btn-save-friend">Save</button>
+          </div>
+          
+          <div id="view-my-ticket" class="hidden">
+            <h2>My Endpoint ID</h2>
+            <div id="my-ticket-display">Loading...</div>
+            <button id="btn-copy-ticket">Copy</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Control Deck -->
+      <div id="controls">
+        <button id="btn-left" class="arcade-btn small-btn">◀</button>
+        
+        <div class="big-btn-container">
+          <button id="btn-boop" class="arcade-btn big-red-btn"></button>
+        </div>
+        
+        <button id="btn-right" class="arcade-btn small-btn">▶</button>
+      </div>
+
+    </div>
+    
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
