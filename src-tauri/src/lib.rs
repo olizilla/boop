@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tauri::{State, Manager};
+use tauri::{State, Manager, TitleBarStyle, WebviewUrl, WebviewWindowBuilder};
 use std::collections::HashMap;
 use boop_core::{IrohManager, address_book::AddressBook, iroh_boops::{BoopQueue, PendingBoopDto}};
 
@@ -157,8 +157,38 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            
+
             log::info!("--- BOOP APP STARTED ---");
+            let win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+                .title("BOOP")
+                .inner_size(450.0, 450.0)
+                .resizable(false)
+                .fullscreen(false);
+
+            // set transparent title bar only when building for macOS
+            #[cfg(target_os = "macos")]
+            let win_builder = win_builder.title_bar_style(TitleBarStyle::Transparent);
+
+            let window = win_builder.build().unwrap();
+
+            // set background color only when building for macOS
+            #[cfg(target_os = "macos")]
+            {
+                use cocoa::appkit::{NSColor, NSWindow};
+                use cocoa::base::{id, nil};
+                let ns_window = window.ns_window().unwrap() as id;
+                unsafe {
+                    let bg_color = NSColor::colorWithRed_green_blue_alpha_(
+                        nil,
+                        0.0 / 255.0,
+                        0.0 / 255.0,
+                        0.5 / 255.0,
+                        1.0,
+                    );
+                    ns_window.setBackgroundColor_(bg_color);
+                }
+            }
+
             
             let app_handle = app.handle().clone();
             let (state, mut rx) = tauri::async_runtime::block_on(async move {

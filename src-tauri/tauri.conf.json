@@ -11,13 +11,6 @@
   },
   "app": {
     "windows": [
-      {
-        "title": "Boop",
-        "width": 450,
-        "height": 450,
-        "resizable": false,
-        "fullscreen": false
-      }
     ],
     "security": {
       "csp": null
