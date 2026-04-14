@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use bytes::Bytes;
 use iroh_docs::{
     AuthorId, DocTicket,
@@ -10,6 +10,7 @@ use iroh_docs::{
 use n0_future::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::iroh_manager::IrohManager;
 
@@ -19,6 +20,7 @@ pub struct Boop {
     pub created: u64,
     pub blob_hash: String,
     pub is_listened: bool,
+    pub mime_type: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -27,6 +29,7 @@ pub struct PendingBoopDto {
     pub created: u64,
     pub blob_hash: String,
     pub is_ready: bool,
+    pub mime_type: String,
 }
 
 impl Boop {
@@ -46,6 +49,7 @@ pub struct BoopQueue {
     doc: Doc,
     ticket: DocTicket,
     author: AuthorId,
+    last_entry_count: AtomicUsize,
 }
 
 impl BoopQueue {
@@ -67,6 +71,7 @@ impl BoopQueue {
             doc,
             ticket,
             author,
+            last_entry_count: AtomicUsize::new(0),
         })
     }
 
@@ -78,7 +83,7 @@ impl BoopQueue {
         self.doc.subscribe().await
     }
 
-    pub async fn send_boop(&mut self, audio_bytes: Vec<u8>) -> Result<()> {
+    pub async fn send_boop(&mut self, audio_bytes: Vec<u8>, mime_type: String) -> Result<()> {
         let created = std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .expect("time drift")
@@ -92,6 +97,7 @@ impl BoopQueue {
             created,
             blob_hash: hash.to_string(),
             is_listened: false,
+            mime_type,
         };
 
         // Insert metadata using chronological key
@@ -118,6 +124,13 @@ impl BoopQueue {
         // 2. Fetch pending boops, scrubbing any that have tombstones
         let entries = self.doc.get_many(Query::key_prefix("boops/")).await?;
         let mut entries = entries.collect::<Vec<Result<Entry>>>().await.into_iter();
+        
+        let current_count = entries.len();
+        let last_count = self.last_entry_count.swap(current_count, Ordering::SeqCst);
+        if current_count > last_count {
+            log::info!("New boops detected! Found {} potential boop metadata entries", current_count);
+        }
+        
         let mut boops = Vec::new();
         
         while let Some(Ok(entry)) = entries.next() {
@@ -132,7 +145,9 @@ impl BoopQueue {
                         use std::str::FromStr;
                         let hash_res = Hash::from_str(&boop.blob_hash);
                         let is_ready = if let Ok(h) = hash_res {
-                             self.iroh.blobs().has(h).await.unwrap_or(false)
+                            let has_blob = self.iroh.blobs().has(h).await.unwrap_or(false);
+                            log::debug!("Boop {}: audio blob {} presence: {}", boop.id, boop.blob_hash, has_blob);
+                            has_blob
                         } else { false };
 
                         boops.push(PendingBoopDto {
@@ -140,9 +155,14 @@ impl BoopQueue {
                             created: boop.created,
                             blob_hash: boop.blob_hash,
                             is_ready,
+                            mime_type: boop.mime_type,
                         });
+                    } else if entry.author() == self.author {
+                        log::trace!("Skipping boop {} as it was authored by us", boop.id);
                     }
                 }
+            } else {
+                log::warn!("Failed to get metadata blob {} for boop entry", entry.content_hash());
             }
         }
         

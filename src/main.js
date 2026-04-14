@@ -154,7 +154,8 @@ async function handleBtnDown() {
     UI.screen.classList.add('state-playing');
     try {
       const bytes = await invoke('get_audio_bytes', { friendId, boopId: boopToPlay.blob_hash });
-      const blob = new Blob([new Uint8Array(bytes)], { type: 'audio/webm' });
+      console.log(`Received boop: ${bytes.length} bytes, type: ${boopToPlay.mime_type}`);
+      const blob = new Blob([new Uint8Array(bytes)], { type: boopToPlay.mime_type });
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audio.onended = async () => {
@@ -186,7 +187,17 @@ async function handleBtnDown() {
     audioStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 16000 }
     });
-    mediaRecorder = new MediaRecorder(audioStream);
+    
+    // Attempt to force WebM/Opus for cross-platform compatibility
+    const options = { mimeType: 'audio/webm;codecs=opus' };
+    if (MediaRecorder.isTypeSupported(options.mimeType)) {
+      mediaRecorder = new MediaRecorder(audioStream, options);
+    } else {
+      console.warn("WebM/Opus not supported, using default recorder");
+      mediaRecorder = new MediaRecorder(audioStream);
+    }
+    console.log("Using MIME type for recording:", mediaRecorder.mimeType);
+    
     audioChunks = [];
     
     mediaRecorder.ondataavailable = e => {
@@ -194,12 +205,12 @@ async function handleBtnDown() {
     };
     
     mediaRecorder.onstop = async () => {
-      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const audioBlob = new Blob(audioChunks);
       const arrayBuffer = await audioBlob.arrayBuffer();
       const bytes = Array.from(new Uint8Array(arrayBuffer));
       
       try {
-        await invoke('send_boop', { friendId, audioBytes: bytes });
+        await invoke('send_boop', { friendId, audioBytes: bytes, mimeType: mediaRecorder.mimeType });
       } catch(e) {
         console.error("Failed to send boop", e);
       }
@@ -249,8 +260,12 @@ function handleBtnUp() {
   }
 }
 
-// Polling for incoming boops
+// Polling for incoming boops and friend list updates
 setInterval(async () => {
+  if (state.friends.length === 0) {
+    await fetchFriends();
+  }
+  
   if (state.friends.length === 0) return;
   
   let totalPending = 0;
@@ -263,8 +278,6 @@ setInterval(async () => {
       console.warn("poll err:", e);
     }
   }
-  
-  // Notification test - Tauri v2 relies on permissions
   
   if (state.status === 'IDLE') {
     updateUI();

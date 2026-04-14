@@ -3,4 +3,5 @@ pub mod address_book;
 pub mod iroh_boops;
 
 pub use iroh_manager::IrohManager;
+pub use iroh;
 

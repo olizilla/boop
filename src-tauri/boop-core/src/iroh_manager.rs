@@ -4,12 +4,12 @@ use iroh::{Endpoint, SecretKey, protocol::Router, protocol::ProtocolHandler, end
 use iroh_blobs::{ALPN as BLOBS_ALPN, BlobsProtocol, api::blobs::Blobs, store::fs::FsStore};
 use iroh_docs::{ALPN as DOCS_ALPN, protocol::Docs};
 use iroh_gossip::{ALPN as GOSSIP_ALPN, net::Gossip};
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
+use tokio::io::AsyncWriteExt;
 use iroh_docs::AuthorId;
-use std::future::Future;
-use std::pin::Pin;
+use std::future::Future; 
 use tokio::sync::mpsc;
 use serde::{Serialize, Deserialize};
+use n0_future::StreamExt;
 
 pub const HANDSHAKE_ALPN: &[u8] = b"boop/handshk";
 
@@ -28,7 +28,7 @@ impl ProtocolHandler for BoopHandshakeHandler {
     fn accept(&self, connection: Connection) -> impl Future<Output = Result<(), AcceptError>> + Send {
         let tx = self.tx.clone();
         async move {
-            if let Ok((mut _send, mut recv)) = connection.accept_bi().await {
+            if let Ok(mut recv) = connection.accept_uni().await {
                 if let Ok(buf) = recv.read_to_end(2048).await {
                     if let Ok(payload) = serde_json::from_slice::<HandshakePayload>(&buf) {
                         // We got the payload, emit it to the app!
@@ -53,14 +53,23 @@ pub struct IrohManager {
 }
 
 impl IrohManager {
-    pub async fn new(path: PathBuf) -> Result<(Self, mpsc::UnboundedReceiver<(String, String)>)> {
+    pub async fn new(path: PathBuf, local_only: bool) -> Result<(Self, mpsc::UnboundedReceiver<(String, String)>)> {
         tokio::fs::create_dir_all(&path).await?;
         let key = Self::load_secret_key(path.clone().join("keypair")).await?;
 
         // 1. Create Endpoint
         let endpoint_id = key.public();
-        
-        let endpoint = Endpoint::builder(presets::N0).secret_key(key).bind().await?;
+        let endpoint = if local_only {
+            use iroh::{address_lookup::MdnsAddressLookup, RelayMode};
+            
+            let builder = Endpoint::empty_builder()
+                .relay_mode(RelayMode::Disabled);
+                
+            let mdns = MdnsAddressLookup::builder().build(endpoint_id).unwrap();
+            builder.address_lookup(mdns).secret_key(key.clone()).bind().await?
+        } else {
+            Endpoint::builder(presets::N0).secret_key(key.clone()).bind().await?
+        };
 
         // 2. Load Blobs FsStore
         let blobs = FsStore::load(&path).await?;
@@ -82,7 +91,13 @@ impl IrohManager {
             .accept(HANDSHAKE_ALPN, std::sync::Arc::new(handshake_handler))
             .spawn();
 
-        let author = docs.author_create().await?;
+        let authors: Vec<Result<AuthorId>> = docs.author_list().await?.collect().await;
+        let author = if let Some(Ok(a)) = authors.into_iter().next() {
+            a
+        } else {
+            docs.author_create().await?
+        };
+        log::info!("Using AuthorId: {}", author);
 
         let manager = Self {
             router,
@@ -112,12 +127,10 @@ impl IrohManager {
         &self.endpoint
     }
     
-    pub async fn dial_friend(&self, endpoint_id_str: &str, doc_ticket: String) -> Result<()> {
-        let endpoint_id: iroh::PublicKey = endpoint_id_str.parse().context("Invalid EndpointId")?;
-        
-        // Usually connect accepts NodeAddr/EndpointAddr, and since iroh 0.17+ NodeAddr implements From<PublicKey>
-        let connection = self.endpoint.connect(endpoint_id, HANDSHAKE_ALPN).await?;
-        let (mut send, mut _recv) = connection.open_bi().await?;
+    pub async fn dial_friend(&self, addr: impl Into<iroh::EndpointAddr>, doc_ticket: String) -> Result<()> {
+        let addr = addr.into();
+        let connection = self.endpoint.connect(addr, HANDSHAKE_ALPN).await?;
+        let mut send = connection.open_uni().await?;
         
         let my_id = self.endpoint_id.to_string();
         
@@ -129,6 +142,9 @@ impl IrohManager {
         let bytes = serde_json::to_vec(&payload)?;
         send.write_all(&bytes).await?;
         send.finish()?;
+        
+        // Give Bob a moment to process before dropping the connection
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         
         Ok(())
     }
@@ -163,10 +179,9 @@ impl IrohManager {
         
         let hash = Hash::from_str(hash_str)?;
         let endpoint_id: iroh::PublicKey = endpoint_id_str.parse().context("Invalid EndpointId")?;
-        let node_addr = iroh::EndpointAddr::from(endpoint_id);
         
         let downloader = iroh_blobs::api::downloader::Downloader::new(&self.store, &self.endpoint);
-        let _ = downloader.download(hash, Some(endpoint_id)).await;
+        downloader.download(hash, Some(endpoint_id)).await.context("Blob download failed")?;
         
         log::info!("Explicit Downloader completed blob fetch!");
         

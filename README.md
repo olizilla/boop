@@ -1,24 +1,25 @@
 # Boop
-A cosy peer-to-peer voice note booper. 
+A cosy peer-to-peer voice note booper.
 
 No cloud, no accounts. Boop lets share voice messages with a friend, from your computer to theirs.
-
-## The Idea
-You shouldn't need a facebook or a google to chat to your friends. 
 
 We once had copper wires between every home, and if we were bored at home, we'd boop a friend's house to see if they were bored at home too. But spam calls and smartphones killed that. Boop is bringing booping back.
 
 ## Cosy stack
-Our friends that made this possible:
+Friends that made this possible:
 - **[Iroh](https://iroh.computer/)**: Fancy peer-to-peer networkinging magic.
-- **[Tauri](https://tauri.app/)**: The app wrap that lets us use web platform magic to boop some audio.
+- **[Tauri](https://tauri.app/)**: The app wrap that lets us use web platform to boop some audio.
 
-### The Protocol
-- `iroh-blobs`: Explicitly downloads and stages heavy WebM audio payloads via content-addressed blob hashing. 
-- `iroh-docs`: Leverages CRDT (Conflict-free Replicated Data Type) document synchronization to instantly gossip lightweight JSON metadata about messages over the network.
+## How it Works:
+1. You record a voice message. The audio is stored locally as a .webm file.
+2. The application creates a JSON record for the message with the hash
+  of the audio file.
+3. This record is synced with your friends's device using `iroh-docs`, a
+  a CRDT-based document synchronization system.
+4. Your friends's booper detects the new record and fetches the audio from you using `iroh-blobs`.
+5. Once the message is listened to, a "listened" receipt is sent back, and both boopers candelete the audio file to keep things neat.
 
-
-More detail in the [Boop Blob Sync Design](docs/boop_blob_sync_design.md)
+More detail in the [Boop Blob Sync doc](docs/boop_blob_sync_design.md)
 
 ## Development
 To run Boop locally, ensure you have the Rust toolchain setup. You can isolate local instances using environment variables to test P2P connections on the same machine!

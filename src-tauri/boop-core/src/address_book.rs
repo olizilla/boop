@@ -19,16 +19,18 @@ impl AddressBook {
         Self { friends: Vec::new() }
     }
 
-    pub fn add_friend(&mut self, nickname: String, endpoint_id: String) {
+    pub fn add_friend(&mut self, nickname: String, endpoint_id: String) -> String {
         let emoji = Self::emoji_for_id(&endpoint_id);
+        let id = uuid::Uuid::new_v4().to_string();
         let friend = Friend {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: id.clone(),
             endpoint_id,
             nickname,
             emoji,
             doc_ticket: None,
         };
         self.friends.push(friend);
+        id
     }
 
     pub fn set_friend_doc(&mut self, endpoint_id: &str, doc_ticket: String) {
