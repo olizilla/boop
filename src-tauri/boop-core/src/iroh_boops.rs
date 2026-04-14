@@ -177,7 +177,7 @@ impl BoopQueue {
         // Write the tombstone receipt so the original author knows to delete
         let key = format!("listened/{}", boop_id);
         self.doc
-            .set_bytes(self.author, key.as_bytes().to_vec(), vec![])
+            .set_bytes(self.author, key.as_bytes().to_vec(), vec![1])
             .await?;
             
         Ok(())
