@@ -210,8 +210,13 @@ export default function App() {
 				'audio/ogg',
 				'audio/mp4'
 			];
+
+			// Debug log for PI troubleshooting
+			supportedTypes.forEach(t => console.log(`[Audio Debug] ${t} supported: ${MediaRecorder.isTypeSupported(t)}`));
+
 			const selectedType = supportedTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
-			
+			console.log(`[Audio Debug] Selected: ${selectedType || 'default'}`);
+
 			mediaRecorder = selectedType 
 				? new MediaRecorder(audioStream, { mimeType: selectedType }) 
 				: new MediaRecorder(audioStream);
