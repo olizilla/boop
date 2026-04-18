@@ -168,7 +168,8 @@ export default function App() {
 			setStatus('PLAYING');
 			try {
 				const bytes = await invoke('get_audio_bytes', { friendId: friend.id, boopId: boopToPlay.blob_hash });
-				const blob = new Blob([new Uint8Array(bytes)], { type: boopToPlay.mime_type });
+				const sanitizedType = boopToPlay.mime_type.split(';')[0]; // see: https://github.com/olizilla/boop/issues/4
+				const blob = new Blob([new Uint8Array(bytes)], { type: sanitizedType });
 				const url = URL.createObjectURL(blob);
 				const audio = new Audio(url);
 				audio.onended = async () => {
@@ -195,9 +196,15 @@ export default function App() {
 		try {
 			await warmUpMic();
 			
-			const options = { mimeType: 'audio/webm;codecs=opus' };
-			mediaRecorder = MediaRecorder.isTypeSupported(options.mimeType) 
-				? new MediaRecorder(audioStream, options) 
+			
+			const supportedTypes = [
+				'audio/webm;codecs=opus',
+				'audio/mp4'
+			];
+			const selectedType = supportedTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
+			
+			mediaRecorder = selectedType 
+				? new MediaRecorder(audioStream, { mimeType: selectedType }) 
 				: new MediaRecorder(audioStream);
 
 			audioChunks = [];
@@ -217,7 +224,9 @@ export default function App() {
 			};
 
 			mediaRecorder.onstop = async () => {
-				const audioBlob = new Blob(audioChunks);
+				// Ensure the blob is typed with the actual recorder mimeType (without codecs for max compatibility)
+				const sanitizedType = mediaRecorder.mimeType.split(';')[0];
+				const audioBlob = new Blob(audioChunks, { type: sanitizedType });
 				const arrayBuffer = await audioBlob.arrayBuffer();
 				const bytes = Array.from(new Uint8Array(arrayBuffer));
 				

@@ -77,6 +77,7 @@ if [ "${MACHINE}" == "Linux" ]; then
     if command -v apt-get &> /dev/null; then
         echo -e "${GREEN}Installing Linux system dependencies...${NC}"
         sudo apt-get update
+        # gstreamer good gives us webm. gstreamer bad gives us opus.
         sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             build-essential \
@@ -86,7 +87,9 @@ if [ "${MACHINE}" == "Linux" ]; then
             libssl-dev \
             libgtk-3-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad
     else
         echo -e "${YELLOW}Warning: Could not find apt-get. Please manually install the following dependencies:${NC}"
         echo "libwebkit2gtk-4.1-dev, build-essential, libssl-dev, libgtk-3-dev, libayatana-appindicator3-dev, librsvg2-dev"
