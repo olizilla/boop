@@ -47,6 +47,10 @@ async fn frontend_ready(state: State<'_, Arc<AppState>>) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // fix ui glitch on linux on arm. see: https://github.com/olizilla/boop/issues/1
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+
     tauri::Builder::default()
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -70,7 +74,9 @@ pub fn run() {
                 .title("BOOP")
                 .inner_size(450.0, 450.0)
                 .resizable(false)
-                .fullscreen(false);
+                .fullscreen(false)
+                // fix ui glitch on linux on arm. see: https://github.com/olizilla/boop/issues/1
+                .visible(false);
 
             #[cfg(target_os = "macos")]
             let win_builder = win_builder.title_bar_style(TitleBarStyle::Transparent);
@@ -86,6 +92,22 @@ pub fn run() {
                     let bg_color = NSColor::colorWithRed_green_blue_alpha(0.0, 0.0, 0.5 / 255.0, 1.0);
                     ns_window.setBackgroundColor(Some(&bg_color));
                 }
+            }
+
+            // fix mic permissions on linux. see: https://github.com/olizilla/boop/issues/2
+            #[cfg(target_os = "linux")]
+            {
+                use webkit2gtk::traits::{PermissionRequestExt, SettingsExt, WebViewExt};
+                window.with_webview(|webview| {
+                    let inner = webview.inner();
+                    let settings = inner.settings().unwrap();
+                    settings.set_enable_media_stream(true);
+                    settings.set_enable_webrtc(true);
+                    inner.connect_permission_request(|_view, request| {
+                        request.allow();
+                        true
+                    });
+                }).unwrap();
             }
 
             let app_handle = app.handle().clone();
