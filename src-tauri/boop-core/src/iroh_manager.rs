@@ -15,13 +15,13 @@ pub const HANDSHAKE_ALPN: &[u8] = b"boop/handshk";
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HandshakePayload {
-	pub sender_endpoint_id: String,
+	pub sender_endpoint_id: iroh::PublicKey,
 	pub doc_ticket: String,
 }
 
 #[derive(Clone, Debug)]
 pub struct BoopHandshakeHandler {
-	pub tx: mpsc::UnboundedSender<(String, String)>, // (endpoint_id, doc_ticket)
+	pub tx: mpsc::UnboundedSender<(iroh::PublicKey, String)>, // (endpoint_id, doc_ticket)
 }
 
 impl ProtocolHandler for BoopHandshakeHandler {
@@ -53,7 +53,7 @@ pub struct IrohManager {
 }
 
 impl IrohManager {
-	pub async fn new(path: PathBuf, local_only: bool) -> Result<(Self, mpsc::UnboundedReceiver<(String, String)>)> {
+	pub async fn new(path: PathBuf, local_only: bool) -> Result<(Self, mpsc::UnboundedReceiver<(iroh::PublicKey, String)>)> {
 		tokio::fs::create_dir_all(&path).await?;
 		let key = Self::load_secret_key(path.clone().join("keypair")).await?;
 
@@ -132,7 +132,7 @@ impl IrohManager {
 		let connection = self.endpoint.connect(addr, HANDSHAKE_ALPN).await?;
 		let mut send = connection.open_uni().await?;
 		
-		let my_id = self.endpoint_id.to_string();
+		let my_id = self.endpoint_id;
 		
 		let payload = HandshakePayload {
 			sender_endpoint_id: my_id,

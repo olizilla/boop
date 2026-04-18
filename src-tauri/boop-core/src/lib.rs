@@ -4,4 +4,5 @@ pub mod iroh_boops;
 
 pub use iroh_manager::IrohManager;
 pub use iroh;
+pub use iroh_blobs;
 

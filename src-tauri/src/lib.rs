@@ -3,11 +3,12 @@ use tokio::sync::Mutex;
 use tauri::{State, Manager, TitleBarStyle, WebviewUrl, WebviewWindowBuilder};
 use std::collections::HashMap;
 use boop_core::{IrohManager, address_book::AddressBook, iroh_boops::{BoopQueue, PendingBoopDto}};
+use std::str::FromStr;
 
 pub struct AppState {
 	pub iroh: IrohManager,
 	pub address_book: Arc<Mutex<AddressBook>>,
-	pub queues: Arc<Mutex<HashMap<String, Arc<Mutex<BoopQueue>>>>>,
+	pub queues: Arc<Mutex<HashMap<uuid::Uuid, Arc<Mutex<BoopQueue>>>>>,
 	pub address_book_path: std::path::PathBuf,
 }
 
@@ -23,20 +24,20 @@ async fn get_my_endpoint(state: State<'_, Arc<AppState>>) -> Result<String, Stri
 }
 
 #[tauri::command]
-async fn add_friend(state: State<'_, Arc<AppState>>, nickname: String, endpoint_id: String) -> Result<String, String> {
+async fn add_friend(state: State<'_, Arc<AppState>>, nickname: String, endpoint_id: String) -> Result<uuid::Uuid, String> {
 	log::info!("Adding friend {} via endpoint: {}", nickname, endpoint_id);
-	let friend_ep = endpoint_id.parse::<boop_core::iroh::EndpointId>().map_err(|e| e.to_string())?;
+	let friend_ep = endpoint_id.parse::<boop_core::iroh::PublicKey>().map_err(|e| e.to_string())?;
 	let mut ab = state.address_book.lock().await;
-	let friend_id = ab.add_friend(nickname, friend_ep.to_string());
+	let friend_id = ab.add_friend(nickname, friend_ep);
 	
 	// Create a new empty document/queue for this pairing locally
 	let queue = BoopQueue::new(None, state.iroh.clone()).await.map_err(|e| e.to_string())?;
 	let doc_ticket = queue.ticket();
 	
-	ab.set_friend_doc(&friend_ep.to_string(), doc_ticket.clone());
+	ab.set_friend_doc(friend_ep, doc_ticket.clone());
 	save_address_book(&state.address_book_path, &ab)?;
 	
-	state.queues.lock().await.insert(friend_id.clone(), Arc::new(Mutex::new(queue)));
+	state.queues.lock().await.insert(friend_id, Arc::new(Mutex::new(queue)));
 	
 	// Try to eagerly dial the friend in the background to share the doc_ticket.
 	// We swallow errors because they might be offline.
@@ -69,8 +70,9 @@ async fn get_friends(state: State<'_, Arc<AppState>>) -> Result<Vec<boop_core::a
 #[tauri::command]
 async fn send_boop(state: State<'_, Arc<AppState>>, friend_id: String, audio_bytes: Vec<u8>, mime_type: String) -> Result<(), String> {
 	log::info!("Recording finished! Queueing a new boop for friend id {} ({})", friend_id, mime_type);
+	let f_id = friend_id.parse::<uuid::Uuid>().map_err(|e| e.to_string())?;
 	let queues = state.queues.lock().await;
-	if let Some(queue_mtx) = queues.get(&friend_id) {
+	if let Some(queue_mtx) = queues.get(&f_id) {
 		let mut queue = queue_mtx.lock().await;
 		queue.send_boop(audio_bytes, mime_type).await.map_err(|e| {
 			log::error!("Failed to enqueue boop: {}", e);
@@ -85,8 +87,9 @@ async fn send_boop(state: State<'_, Arc<AppState>>, friend_id: String, audio_byt
 
 #[tauri::command]
 async fn get_pending_boops(state: State<'_, Arc<AppState>>, friend_id: String) -> Result<Vec<PendingBoopDto>, String> {
+	let f_id = friend_id.parse::<uuid::Uuid>().map_err(|e| e.to_string())?;
 	let queues = state.queues.lock().await;
-	if let Some(queue_mtx) = queues.get(&friend_id) {
+	if let Some(queue_mtx) = queues.get(&f_id) {
 		let queue = queue_mtx.lock().await;
 		let boops = queue.get_pending_boops().await.map_err(|e| e.to_string())?;
 		Ok(boops)
@@ -97,10 +100,12 @@ async fn get_pending_boops(state: State<'_, Arc<AppState>>, friend_id: String) -
 
 #[tauri::command]
 async fn get_audio_bytes(state: State<'_, Arc<AppState>>, friend_id: String, boop_id: String) -> Result<Vec<u8>, String> {
+	let f_id = friend_id.parse::<uuid::Uuid>().map_err(|e| e.to_string())?;
+	let hash = boop_core::iroh_blobs::Hash::from_str(&boop_id).map_err(|e| e.to_string())?;
 	let queues = state.queues.lock().await;
-	if let Some(queue_mtx) = queues.get(&friend_id) {
+	if let Some(queue_mtx) = queues.get(&f_id) {
 		let queue = queue_mtx.lock().await;
-		let bytes = queue.get_audio_bytes(&boop_id).await.map_err(|e| e.to_string())?;
+		let bytes = queue.get_audio_bytes(hash).await.map_err(|e| e.to_string())?;
 		Ok(bytes)
 	} else {
 		Err("Friend queue not initialized".into())
@@ -109,10 +114,12 @@ async fn get_audio_bytes(state: State<'_, Arc<AppState>>, friend_id: String, boo
 
 #[tauri::command]
 async fn mark_listened(state: State<'_, Arc<AppState>>, friend_id: String, boop_id: String) -> Result<(), String> {
+	let f_id = friend_id.parse::<uuid::Uuid>().map_err(|e| e.to_string())?;
+	let b_id = boop_id.parse::<uuid::Uuid>().map_err(|e| e.to_string())?;
 	let queues = state.queues.lock().await;
-	if let Some(queue_mtx) = queues.get(&friend_id) {
+	if let Some(queue_mtx) = queues.get(&f_id) {
 		let queue = queue_mtx.lock().await;
-		queue.mark_listened(&boop_id).await.map_err(|e| e.to_string())?;
+		queue.mark_listened(b_id).await.map_err(|e| e.to_string())?;
 		Ok(())
 	} else {
 		Err("Friend queue not initialized".into())
@@ -121,20 +128,18 @@ async fn mark_listened(state: State<'_, Arc<AppState>>, friend_id: String, boop_
 
 #[tauri::command]
 async fn download_boop(state: State<'_, Arc<AppState>>, friend_id: String, hash_str: String) -> Result<(), String> {
-	log::info!("Eagerly downloading blob {} for friend {}", hash_str, friend_id);
-	let mut friend_endpoint = String::new();
+	let f_id = friend_id.parse::<uuid::Uuid>().map_err(|e| e.to_string())?;
+	let mut friend_endpoint = None;
 	{
 		let ab = state.address_book.lock().await;
-		if let Some(f) = ab.friends.iter().find(|x| x.id == friend_id) {
-			friend_endpoint = f.endpoint_id.clone();
+		if let Some(f) = ab.friends.iter().find(|x| x.id == f_id) {
+			friend_endpoint = Some(f.endpoint_id);
 		}
 	}
 	
-	if friend_endpoint.is_empty() {
-		return Err("Friend not found".into());
-	}
+	let friend_endpoint = friend_endpoint.ok_or_else(|| "Friend not found".to_string())?;
 	
-	state.iroh.fetch_blob(&hash_str, &friend_endpoint).await.map_err(|e| e.to_string())?;
+	state.iroh.fetch_blob(&hash_str, &friend_endpoint.to_string()).await.map_err(|e| e.to_string())?;
 	Ok(())
 }
 
@@ -214,7 +219,7 @@ pub fn run() {
 					for friend in &ab.friends {
 						if let Some(ref ticket) = friend.doc_ticket {
 							if let Ok(queue) = BoopQueue::new(Some(ticket.clone()), iroh.clone()).await {
-								queues.lock().await.insert(friend.id.clone(), Arc::new(Mutex::new(queue)));
+								queues.lock().await.insert(friend.id, Arc::new(Mutex::new(queue)));
 							}
 						}
 					}
@@ -243,13 +248,13 @@ pub fn run() {
 					// If we don't naturally have this friend, create an implicit one
 					let is_existing = ab.friends.iter().any(|f| f.endpoint_id == sender_endpoint);
 					if !is_existing {
-						ab.add_friend(format!("Friend {}", &sender_endpoint[..5]), sender_endpoint.clone());
+						ab.add_friend(format!("Friend {}", &sender_endpoint.to_string()[..5]), sender_endpoint);
 					}
 					
-					ab.set_friend_doc(&sender_endpoint, doc_ticket.clone());
+					ab.set_friend_doc(sender_endpoint, doc_ticket.clone());
 					save_address_book(&state_for_handshake.address_book_path, &ab).ok();
 					
-					let friend_id = ab.friends.iter().find(|f| f.endpoint_id == sender_endpoint).unwrap().id.clone();
+					let friend_id = ab.friends.iter().find(|f| f.endpoint_id == sender_endpoint).unwrap().id;
 					log::info!("Local Handshake processed! Syncing doc for local friend id {}", friend_id);
 					
 					// Init queue

@@ -16,18 +16,18 @@ use crate::iroh_manager::IrohManager;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Boop {
-	pub id: String,
+	pub id: uuid::Uuid,
 	pub created: u64,
-	pub blob_hash: String,
+	pub blob_hash: iroh_blobs::Hash,
 	pub is_listened: bool,
 	pub mime_type: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PendingBoopDto {
-	pub id: String,
+	pub id: uuid::Uuid,
 	pub created: u64,
-	pub blob_hash: String,
+	pub blob_hash: iroh_blobs::Hash,
 	pub is_ready: bool,
 	pub mime_type: String,
 }
@@ -88,14 +88,14 @@ impl BoopQueue {
 			.duration_since(std::time::SystemTime::UNIX_EPOCH)
 			.expect("time drift")
 			.as_secs();
-		let id = uuid::Uuid::new_v4().to_string();
+		let id = uuid::Uuid::new_v4();
 		
 		let hash = self.iroh.blobs().add_bytes(audio_bytes).await?.hash;
 
 		let boop = Boop {
-			id: id.clone(),
+			id,
 			created,
-			blob_hash: hash.to_string(),
+			blob_hash: hash,
 			is_listened: false,
 			mime_type,
 		};
@@ -136,19 +136,13 @@ impl BoopQueue {
 		while let Some(Ok(entry)) = entries.next() {
 			if let Ok(b) = self.iroh.blobs().get_bytes(entry.content_hash()).await {
 				if let Ok(boop) = Boop::from_bytes(b) {
-					if tombstones.contains(&boop.id) && entry.author() == self.author {
+					if tombstones.contains(&boop.id.to_string()) && entry.author() == self.author {
 						// The recipient listened to it! Delete the doc entry.
 						log::info!("Garbage collecting boop {} due to tombstone", boop.id);
 						self.doc.del(self.author, entry.key().to_vec()).await.ok();
 					} else if !boop.is_listened && entry.author() != self.author {
-						use iroh_blobs::Hash;
-						use std::str::FromStr;
-						let hash_res = Hash::from_str(&boop.blob_hash);
-						let is_ready = if let Ok(h) = hash_res {
-							let has_blob = self.iroh.blobs().has(h).await.unwrap_or(false);
-							log::debug!("Boop {}: audio blob {} presence: {}", boop.id, boop.blob_hash, has_blob);
-							has_blob
-						} else { false };
+						let is_ready = self.iroh.blobs().has(boop.blob_hash).await.unwrap_or(false);
+						log::debug!("Boop {}: audio blob {} presence: {}", boop.id, boop.blob_hash, is_ready);
 
 						boops.push(PendingBoopDto {
 							id: boop.id,
@@ -171,7 +165,7 @@ impl BoopQueue {
 	}
 
 
-	pub async fn mark_listened(&self, boop_id: &str) -> Result<()> {
+	pub async fn mark_listened(&self, boop_id: uuid::Uuid) -> Result<()> {
 		log::info!("Marking boop {} as listened", boop_id);
 		
 		// Write the tombstone receipt so the original author knows to delete
@@ -183,10 +177,7 @@ impl BoopQueue {
 		Ok(())
 	}
 	
-	pub async fn get_audio_bytes(&self, hash_str: &str) -> Result<Vec<u8>> {
-		use iroh_blobs::Hash;
-		use std::str::FromStr;
-		let hash = Hash::from_str(hash_str)?;
+	pub async fn get_audio_bytes(&self, hash: iroh_blobs::Hash) -> Result<Vec<u8>> {
 		let bytes = self.iroh.blobs().get_bytes(hash).await?;
 		Ok(bytes.to_vec())
 	}

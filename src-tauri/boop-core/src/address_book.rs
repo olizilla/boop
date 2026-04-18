@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Friend {
-	pub id: String, // Random unique id (local to the address book, for UI routing)
-	pub endpoint_id: String, // Their public Iroh EndpointID
+	pub id: uuid::Uuid, // Random unique id (local to the address book, for UI routing)
+	pub endpoint_id: iroh::PublicKey, // Their public Iroh EndpointID
 	pub nickname: String,
 	pub emoji: String,
 	pub doc_ticket: Option<String>, // The negotiated iroh-docs ticket of the shared queue
@@ -19,11 +19,11 @@ impl AddressBook {
 		Self { friends: Vec::new() }
 	}
 
-	pub fn add_friend(&mut self, nickname: String, endpoint_id: String) -> String {
-		let emoji = Self::emoji_for_id(&endpoint_id);
-		let id = uuid::Uuid::new_v4().to_string();
+	pub fn add_friend(&mut self, nickname: String, endpoint_id: iroh::PublicKey) -> uuid::Uuid {
+		let emoji = Self::emoji_for_id(&endpoint_id.to_string());
+		let id = uuid::Uuid::new_v4();
 		let friend = Friend {
-			id: id.clone(),
+			id,
 			endpoint_id,
 			nickname,
 			emoji,
@@ -33,7 +33,7 @@ impl AddressBook {
 		id
 	}
 
-	pub fn set_friend_doc(&mut self, endpoint_id: &str, doc_ticket: String) {
+	pub fn set_friend_doc(&mut self, endpoint_id: iroh::PublicKey, doc_ticket: String) {
 		if let Some(friend) = self.friends.iter_mut().find(|f| f.endpoint_id == endpoint_id) {
 			friend.doc_ticket = Some(doc_ticket);
 		}
