@@ -89,7 +89,9 @@ if [ "${MACHINE}" == "Linux" ]; then
             libayatana-appindicator3-dev \
             librsvg2-dev \
             gstreamer1.0-plugins-good \
-            gstreamer1.0-plugins-bad
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-libav \
+            gstreamer1.0-tools
     else
         echo -e "${YELLOW}Warning: Could not find apt-get. Please manually install the following dependencies:${NC}"
         echo "libwebkit2gtk-4.1-dev, build-essential, libssl-dev, libgtk-3-dev, libayatana-appindicator3-dev, librsvg2-dev"

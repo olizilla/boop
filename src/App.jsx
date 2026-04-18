@@ -169,8 +169,11 @@ export default function App() {
 			try {
 				const bytes = await invoke('get_audio_bytes', { friendId: friend.id, boopId: boopToPlay.blob_hash });
 				const sanitizedType = boopToPlay.mime_type.split(';')[0]; // see: https://github.com/olizilla/boop/issues/4
+				console.log('boop to play', boopToPlay.mime_type);
+				console.log('Mek blob type', sanitizedType);
 				const blob = new Blob([new Uint8Array(bytes)], { type: sanitizedType });
 				const url = URL.createObjectURL(blob);
+				console.log('Mek audio', url.substring(0, 60));
 				const audio = new Audio(url);
 				audio.onended = async () => {
 					setStatus('IDLE');
@@ -179,8 +182,11 @@ export default function App() {
 						if (draft[friend.id]) draft[friend.id].shift();
 					}));
 				};
-				audio.play();
+				console.log('Play!')
+				await audio.play();
+				console.log('wtf!')
 			} catch (e) {
+				console.log('ERR!')
 				console.error(e);
 				setStatus('IDLE');
 			}
@@ -199,6 +205,9 @@ export default function App() {
 			
 			const supportedTypes = [
 				'audio/webm;codecs=opus',
+				'audio/webm',
+				'audio/ogg;codecs=opus',
+				'audio/ogg',
 				'audio/mp4'
 			];
 			const selectedType = supportedTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
