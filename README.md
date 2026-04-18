@@ -5,6 +5,8 @@ No cloud, no accounts. Boop lets share voice messages with a friend, from your c
 
 We once had copper wires between every home, and if we were bored at home, we'd boop a friend's house to see if they were bored at home too. But spam calls and smartphones killed that. Boop is bringing booping back.
 
+> Warning: this is for fun. it is early days. it may work. no promises.
+
 ## Cosy stack
 Friends that made this possible:
 - **[Iroh](https://iroh.computer/)**: Fancy peer-to-peer networkinging magic.
