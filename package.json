@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "setup": "bash scripts/setup.sh"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

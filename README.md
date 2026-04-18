@@ -24,12 +24,18 @@ Friends that made this possible:
 More detail in the [Boop Blob Sync doc](docs/boop_blob_sync_design.md)
 
 ## Development
-To run Boop locally, ensure you have the Rust toolchain setup. You can isolate local instances using environment variables to test P2P connections on the same machine!
+To get started with Boop, ensure you have Node.js and Rust installed, then run the setup script to install system dependencies and project packages:
+
+```bash
+npm run setup
+```
+
+To run the application locally, you can use `npm run tauri dev`. You can even isolate local instances using environment variables to test P2P connections on the same machine!
 
 ```bash
 # Run Instance A
-cargo tauri dev
+npm run tauri dev
 
 # Run Instance B alongside it natively on custom local paths
-BOOP_DATA_DIR=/tmp/boop_b cargo tauri dev
+BOOP_DATA_DIR=/tmp/boop_b npm run tauri dev
 ```
