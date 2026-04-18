@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../tauri-bridge';
 
 export default function AddFriendView(props) {
 	const [nickname, setNickname] = createSignal('');
@@ -24,17 +24,19 @@ export default function AddFriendView(props) {
 		<div id="view-add-friend">
 			<h2>Add Friend</h2>
 			<input 
+				id="input-nickname"
 				type="text" 
 				placeholder="Nickname" 
 				value={nickname()} 
 				onInput={(e) => setNickname(e.currentTarget.value)} 
 			/>
 			<textarea 
+				id="input-endpoint-id"
 				placeholder="Paste Endpoint ID..." 
 				value={ticket()} 
 				onInput={(e) => setTicket(e.currentTarget.value)}
 			></textarea>
-			<button onClick={handleSave}>Save</button>
+			<button id="btn-save-friend" onClick={handleSave}>Save</button>
 		</div>
 	);
 }

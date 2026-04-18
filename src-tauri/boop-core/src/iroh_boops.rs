@@ -32,7 +32,7 @@ pub struct PendingBoopDto {
 }
 
 impl Boop {
-	fn from_bytes(bytes: Bytes) -> Result<Self> {
+	pub fn from_bytes(bytes: Bytes) -> Result<Self> {
 		let boop = serde_json::from_slice(&bytes).context("invalid json")?;
 		Ok(boop)
 	}
@@ -56,6 +56,7 @@ impl BoopQueue {
 		let doc = match ticket {
 			None => iroh.docs().create().await?,
 			Some(t) => {
+				println!("TRYING TO PARSE TICKET: '{}'", t);
 				let ticket = DocTicket::from_str(&t)?;
 				iroh.docs().import(ticket).await?
 			}
@@ -76,6 +77,10 @@ impl BoopQueue {
 
 	pub fn ticket(&self) -> String {
 		self.ticket.to_string()
+	}
+
+	pub fn native_ticket(&self) -> DocTicket {
+		self.ticket.clone()
 	}
 
 	pub async fn doc_subscribe(&self) -> Result<impl Stream<Item = Result<LiveEvent>> + use<>> {
@@ -185,5 +190,33 @@ impl BoopQueue {
 	pub async fn get_audio_bytes(&self, hash: iroh_blobs::Hash) -> Result<Vec<u8>> {
 		let bytes = self.iroh.blobs().get_bytes(hash).await?;
 		Ok(bytes.to_vec())
+	}
+
+	pub async fn garbage_collect_tombstones(&self) -> Result<()> {
+		// Quick run of exactly what get_pending_boops does for GC
+		let mut tombstones = std::collections::HashSet::new();
+		let t_entries = self.doc.get_many(Query::key_prefix("listened/")).await?;
+		tokio::pin!(t_entries);
+		while let Some(Ok(entry)) = t_entries.next().await {
+			if let Ok(key_str) = String::from_utf8(entry.key().to_vec()) {
+				let id = key_str.replace("listened/", "");
+				tombstones.insert(id);
+			}
+		}
+
+		let entries = self.doc.get_many(Query::key_prefix("boops/")).await?;
+		tokio::pin!(entries);
+		while let Some(Ok(entry)) = entries.next().await {
+			let b = match self.iroh.blobs().get_bytes(entry.content_hash()).await {
+				Ok(b) => b,
+				Err(_) => continue,
+			};
+			let Ok(boop) = Boop::from_bytes(b) else { continue; };
+
+			if tombstones.contains(&boop.id.to_string()) && entry.author() == self.author {
+				self.doc.del(self.author, entry.key().to_vec()).await.ok();
+			}
+		}
+		Ok(())
 	}
 }

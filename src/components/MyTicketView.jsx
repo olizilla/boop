@@ -1,5 +1,5 @@
 import { createResource, createSignal } from 'solid-js';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../tauri-bridge';
 
 export default function MyTicketView() {
 	const [ticket] = createResource(() => invoke('get_my_endpoint'));

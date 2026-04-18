@@ -1,6 +1,6 @@
-import { createSignal, createEffect, onMount, onCleanup, Show, Match, Switch } from 'solid-js';
-import { createStore } from 'solid-js/store';
-import { invoke } from '@tauri-apps/api/core';
+import { createSignal, onMount, onCleanup, Show, Match, Switch } from 'solid-js';
+import { createStore, produce } from 'solid-js/store';
+import { invoke, listen } from './tauri-bridge';
 import AddFriendView from './components/AddFriendView';
 import MyTicketView from './components/MyTicketView';
 
@@ -21,70 +21,92 @@ export default function App() {
 	let mediaRecorder = null;
 	let audioChunks = [];
 	let audioTimeout = null;
+	let gettingStream = null;
+	let recordStartTime = 0;
+	let isBoopPressed = false;
+
+	const warmUpMic = async () => {
+		if (audioStream) return audioStream;
+		if (gettingStream) return gettingStream;
+		
+		gettingStream = navigator.mediaDevices.getUserMedia({
+			audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 16000 }
+		}).then(stream => {
+			audioStream = stream;
+			gettingStream = null;
+			return stream;
+		}).catch(e => {
+			gettingStream = null;
+			throw e;
+		});
+		return gettingStream;
+	};
 
 	const currentFriend = () => friends()[currentIndex()];
 
-	const fetchFriends = async () => {
-		const list = await invoke('get_friends');
-		setFriends(list);
-		if (list.length === 0) {
-			setMode(MODE_ADD_FRIEND);
-		} else if (mode() === MODE_FRIEND && currentIndex() >= list.length) {
-			setCurrentIndex(0);
-		}
-	};
-
-	// Polling & Focus listeners
-	onMount(() => {
-		fetchFriends();
-		
+	onMount(async () => {
 		const handleFocus = () => setIsFocused(true);
 		const handleBlur = () => setIsFocused(false);
 		window.addEventListener('focus', handleFocus);
 		window.addEventListener('blur', handleBlur);
 
-		const interval = setInterval(async () => {
-			if (friends().length === 0) {
-				await fetchFriends();
-				if (friends().length === 0) return;
-			}
+		// Pre-warm the mic so first record is instant
+		warmUpMic().catch(() => {});
 
-			for (const friend of friends()) {
-				try {
-					const boops = await invoke('get_pending_boops', { friendId: friend.id });
-					// Preserve our local _downloading flags if they exist
-					const existing = pendingBoops[friend.id] || [];
-					const updated = boops.map(nb => {
-							const matching = existing.find(eb => eb.id === nb.id);
-							return matching ? { ...nb, _downloading: matching._downloading } : nb;
-					});
-					setPendingBoops(friend.id, updated);
-				} catch (e) {
-					console.warn("poll err:", e);
-				}
-			}
-		}, 3000);
+		const unlisten = await listen('core-event', (ev) => {
+			const rawPayload = ev.payload;
+			// Tauri serde yields either `{ type: '...', ... }` if tagged properly, 
+			// or `{ StateSnapshot: { ... } }` depending on derive macro.
+			// Let's handle Rust enum tagging explicitly
+			const typeKey = typeof rawPayload === 'object' && rawPayload !== null ? Object.keys(rawPayload)[0] : null;
+			if (!typeKey) return;
+			
+			const payload = rawPayload[typeKey];
 
-		// Auto-downloader effect
-		createEffect(() => {
-				Object.keys(pendingBoops).forEach(friendId => {
-						const list = pendingBoops[friendId];
-						if (list && list.length > 0) {
-								const latest = list[0];
-								if (!latest.is_ready && !latest._downloading) {
-										setPendingBoops(friendId, 0, '_downloading', true);
-										invoke('download_boop', { friendId, hashStr: latest.blob_hash })
-												.catch(e => {
-														console.error("fetch err:", e);
-														setPendingBoops(friendId, 0, '_downloading', false);
-												});
-								}
+			switch (typeKey) {
+				case 'stateSnapshot':
+					setFriends(payload.friends);
+					Object.entries(payload.pendingBoops).forEach(([k, v]) => setPendingBoops(k, v));
+					if (payload.friends.length === 0) {
+						setMode(MODE_ADD_FRIEND);
+					} else {
+						setMode(MODE_FRIEND);
+						setCurrentIndex(0);
+					}
+					break;
+				case 'friendAdded':
+					const nextIndex = friends().length;
+					setFriends(f => [...f, payload.friend]);
+					setCurrentIndex(nextIndex);
+					setMode(MODE_FRIEND);
+					break;
+				case 'boopReceived':
+					console.log("[CoreEvent] boopReceived", payload);
+					setPendingBoops(produce(draft => {
+						const fId = payload.friend_id;
+						if (!draft[fId]) draft[fId] = [];
+						draft[fId].push(payload.boop);
+					}));
+					break;
+				case 'boopReady':
+					console.log("[CoreEvent] boopReady", payload);
+					setPendingBoops(produce(draft => {
+						const arr = draft[payload.friend_id];
+						if (arr) {
+							const idx = arr.findIndex(b => b.id === payload.boop_id);
+							if (idx !== -1) arr[idx].is_ready = true;
 						}
-				});
+					}));
+					break;
+				default:
+					break;
+			}
 		});
 
+		await invoke('frontend_ready');
+
 		onCleanup(() => {
-			clearInterval(interval);
+			if (typeof unlisten === 'function') unlisten();
 			window.removeEventListener('focus', handleFocus);
 			window.removeEventListener('blur', handleBlur);
 		});
@@ -137,13 +159,7 @@ export default function App() {
 		if (pending.length > 0) {
 			const boopToPlay = pending[0];
 			if (!boopToPlay.is_ready) {
-				// Trigger download if not already
-				if (!boopToPlay._downloading) {
-						boopToPlay._downloading = true; // Local flag
-						invoke('download_boop', { friendId: friend.id, hashStr: boopToPlay.blob_hash })
-							.catch(e => console.error("fetch err:", e));
-				}
-				return;
+				return; // Download handled by core automatically
 			}
 			
 			// Play
@@ -156,9 +172,9 @@ export default function App() {
 				audio.onended = async () => {
 					setStatus('IDLE');
 					await invoke('mark_listened', { friendId: friend.id, boopId: boopToPlay.id });
-					const updated = [...pendingBoops[friend.id]];
-					updated.shift();
-					setPendingBoops(friend.id, updated);
+					setPendingBoops(produce(draft => {
+						if (draft[friend.id]) draft[friend.id].shift();
+					}));
 				};
 				audio.play();
 			} catch (e) {
@@ -172,11 +188,11 @@ export default function App() {
 	};
 
 	const startRecording = async () => {
-		setStatus('RECORDING');
+		isBoopPressed = true;
+		setStatus('WAKING_MIC');
 		try {
-			audioStream = await navigator.mediaDevices.getUserMedia({
-				audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 16000 }
-			});
+			await warmUpMic();
+			
 			const options = { mimeType: 'audio/webm;codecs=opus' };
 			mediaRecorder = MediaRecorder.isTypeSupported(options.mimeType) 
 				? new MediaRecorder(audioStream, options) 
@@ -184,6 +200,20 @@ export default function App() {
 
 			audioChunks = [];
 			mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+			
+			mediaRecorder.onstart = () => {
+				if (!isBoopPressed) {
+					// User released the button very quickly while waking mic, enforce minimum 1s record
+					setStatus('RECORDING');
+					setTimeout(() => {
+						if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+					}, 1000);
+				} else {
+					setStatus('RECORDING');
+					recordStartTime = Date.now();
+				}
+			};
+
 			mediaRecorder.onstop = async () => {
 				const audioBlob = new Blob(audioChunks);
 				const arrayBuffer = await audioBlob.arrayBuffer();
@@ -197,11 +227,14 @@ export default function App() {
 					});
 				} catch(e) { console.error("Send failed", e); }
 				
-				audioStream.getTracks().forEach(t => t.stop());
+				// We no longer stop the tracks here so the stream stays warm!
 				startCooldown();
 			};
 			mediaRecorder.start();
-			audioTimeout = setTimeout(() => handleBoopUp(), 20000);
+			audioTimeout = setTimeout(() => {
+				isBoopPressed = false;
+				handleBoopUp();
+			}, 20000);
 		} catch (e) {
 			console.error(e);
 			setStatus('IDLE');
@@ -221,9 +254,21 @@ export default function App() {
 	};
 
 	const handleBoopUp = () => {
-		if (status() === 'RECORDING' && mediaRecorder && mediaRecorder.state !== 'inactive') {
+		isBoopPressed = false;
+		if ((status() === 'RECORDING' || status() === 'WAKING_MIC') && mediaRecorder && mediaRecorder.state !== 'inactive') {
 			clearTimeout(audioTimeout);
-			mediaRecorder.stop();
+			if (status() === 'RECORDING') {
+				const elapsed = Date.now() - recordStartTime;
+				if (elapsed < 1000) {
+					// Guarantee minimum 1s recording
+					setTimeout(() => {
+						if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+					}, 1000 - elapsed);
+				} else {
+					mediaRecorder.stop();
+				}
+			}
+			// If WAKING_MIC, we let the onstart callback handle the 1s wrap-up
 		}
 	};
 
@@ -232,7 +277,7 @@ export default function App() {
 			<div id="screen" classList={{
 				'state-idle': status() === 'IDLE',
 				'state-playing': status() === 'PLAYING',
-				'state-recording': status() === 'RECORDING',
+				'state-recording': status() === 'RECORDING' || status() === 'WAKING_MIC',
 				'state-cooldown': status() === 'COOLDOWN'
 			}}>
 				<div id="screen-glare"></div>
@@ -247,7 +292,7 @@ export default function App() {
 							<MyTicketView />
 						</Match>
 						<Match when={mode() === MODE_ADD_FRIEND}>
-							<AddFriendView onSaved={() => { fetchFriends(); setMode(MODE_FRIEND); setCurrentIndex(friends().length - 1); }} />
+							<AddFriendView onSaved={() => {}} />
 						</Match>
 						<Match when={mode() === MODE_FRIEND && currentFriend()}>
 							<div class="contact-info">
@@ -257,6 +302,9 @@ export default function App() {
 							
 							<div id="message-status">
 								<Switch fallback={<span>hold red button to record</span>}>
+									<Match when={status() === 'WAKING_MIC'}>
+										<span class="pulse">warming up...</span>
+									</Match>
 									<Match when={status() === 'RECORDING'}>
 										<span class="pulse">recording...</span>
 									</Match>
@@ -268,7 +316,7 @@ export default function App() {
 									</Match>
 									<Match when={(pendingBoops[currentFriend().id] || []).length > 0}>
 										<div class="pulse">
-												<Show when={pendingBoops[currentFriend().id][0].is_ready} 
+												<Show when={pendingBoops[currentFriend().id]?.[0]?.is_ready} 
 															fallback={<span style="color: yellow">fetching boop...</span>}>
 														boops: {pendingBoops[currentFriend().id].length} - tap to play
 												</Show>
