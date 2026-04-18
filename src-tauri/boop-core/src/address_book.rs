@@ -11,12 +11,12 @@ pub struct Friend {
 
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct AddressBook {
-	pub friends: Vec<Friend>,
+	pub friends: std::collections::HashMap<iroh::PublicKey, Friend>,
 }
 
 impl AddressBook {
 	pub fn new() -> Self {
-		Self { friends: Vec::new() }
+		Self { friends: std::collections::HashMap::new() }
 	}
 
 	pub fn add_friend(&mut self, nickname: String, endpoint_id: iroh::PublicKey) -> uuid::Uuid {
@@ -29,12 +29,12 @@ impl AddressBook {
 			emoji,
 			doc_ticket: None,
 		};
-		self.friends.push(friend);
+		self.friends.insert(endpoint_id, friend);
 		id
 	}
 
 	pub fn set_friend_doc(&mut self, endpoint_id: iroh::PublicKey, doc_ticket: String) {
-		if let Some(friend) = self.friends.iter_mut().find(|f| f.endpoint_id == endpoint_id) {
+		if let Some(friend) = self.friends.get_mut(&endpoint_id) {
 			friend.doc_ticket = Some(doc_ticket);
 		}
 	}

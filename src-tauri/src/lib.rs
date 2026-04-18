@@ -64,7 +64,7 @@ async fn is_friend_online(_state: State<'_, Arc<AppState>>, _endpoint_id: String
 #[tauri::command]
 async fn get_friends(state: State<'_, Arc<AppState>>) -> Result<Vec<boop_core::address_book::Friend>, String> {
 	let ab = state.address_book.lock().await;
-	Ok(ab.friends.clone())
+	Ok(ab.friends.values().cloned().collect())
 }
 
 #[tauri::command]
@@ -132,7 +132,7 @@ async fn download_boop(state: State<'_, Arc<AppState>>, friend_id: String, hash_
 	let mut friend_endpoint = None;
 	{
 		let ab = state.address_book.lock().await;
-		if let Some(f) = ab.friends.iter().find(|x| x.id == f_id) {
+		if let Some(f) = ab.friends.values().find(|x| x.id == f_id) {
 			friend_endpoint = Some(f.endpoint_id);
 		}
 	}
@@ -206,7 +206,10 @@ pub fn run() {
 				
 				let address_book = if address_book_path.exists() {
 					let json = std::fs::read_to_string(&address_book_path).expect("failed to read address book");
-					serde_json::from_str(&json).expect("failed to parse address book")
+					serde_json::from_str(&json).unwrap_or_else(|e| {
+						log::warn!("Failed to parse address book, starting fresh: {}", e);
+						AddressBook::new()
+					})
 				} else {
 					AddressBook::new()
 				};
@@ -217,7 +220,7 @@ pub fn run() {
 				// Pre-warm queues for existing friends
 				{
 					let ab = address_book.lock().await;
-					for friend in &ab.friends {
+					for friend in ab.friends.values() {
 						if let Some(ref ticket) = friend.doc_ticket {
 							if let Ok(queue) = BoopQueue::new(Some(ticket.clone()), iroh.clone()).await {
 								queues.lock().await.insert(friend.id, Arc::new(Mutex::new(queue)));
@@ -247,7 +250,7 @@ pub fn run() {
 					let mut ab = state_for_handshake.address_book.lock().await;
 					
 					// If we don't naturally have this friend, create an implicit one
-					let is_existing = ab.friends.iter().any(|f| f.endpoint_id == sender_endpoint);
+					let is_existing = ab.friends.contains_key(&sender_endpoint);
 					if !is_existing {
 						ab.add_friend(format!("Friend {}", &sender_endpoint.to_string()[..5]), sender_endpoint);
 					}
@@ -255,7 +258,7 @@ pub fn run() {
 					ab.set_friend_doc(sender_endpoint, doc_ticket.clone());
 					save_address_book(&state_for_handshake.address_book_path, &ab).ok();
 					
-					let friend_id = ab.friends.iter().find(|f| f.endpoint_id == sender_endpoint).unwrap().id;
+					let friend_id = ab.friends.get(&sender_endpoint).unwrap().id;
 					log::info!("Local Handshake processed! Syncing doc for local friend id {}", friend_id);
 					
 					// Init queue

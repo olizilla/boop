@@ -4,8 +4,7 @@ use iroh_docs::{
 	AuthorId, DocTicket,
 	api::{Doc, protocol::ShareMode},
 	engine::LiveEvent,
-	store::Query,
-	sync::Entry,
+	store::Query
 };
 use n0_future::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -113,8 +112,8 @@ impl BoopQueue {
 		// 1. Gather all listened tombstones
 		let mut tombstones = std::collections::HashSet::new();
 		let t_entries = self.doc.get_many(Query::key_prefix("listened/")).await?;
-		let mut t_entries = t_entries.collect::<Vec<Result<Entry>>>().await.into_iter();
-		while let Some(Ok(entry)) = t_entries.next() {
+		tokio::pin!(t_entries);
+		while let Some(Ok(entry)) = t_entries.next().await {
 			if let Ok(key_str) = String::from_utf8(entry.key().to_vec()) {
 				let id = key_str.replace("listened/", "");
 				tombstones.insert(id);
@@ -123,41 +122,47 @@ impl BoopQueue {
 
 		// 2. Fetch pending boops, scrubbing any that have tombstones
 		let entries = self.doc.get_many(Query::key_prefix("boops/")).await?;
-		let mut entries = entries.collect::<Vec<Result<Entry>>>().await.into_iter();
+		tokio::pin!(entries);
 		
-		let current_count = entries.len();
+		let mut current_count = 0;
+		let mut boops = Vec::new();
+		
+		while let Some(Ok(entry)) = entries.next().await {
+			current_count += 1;
+			
+			let b = match self.iroh.blobs().get_bytes(entry.content_hash()).await {
+				Ok(b) => b,
+				Err(_) => {
+					log::warn!("Failed to get metadata blob {} for boop entry", entry.content_hash());
+					continue;
+				}
+			};
+			
+			let Ok(boop) = Boop::from_bytes(b) else { continue; };
+
+			if tombstones.contains(&boop.id.to_string()) && entry.author() == self.author {
+				// The recipient listened to it! Delete the doc entry.
+				log::info!("Garbage collecting boop {} due to tombstone", boop.id);
+				self.doc.del(self.author, entry.key().to_vec()).await.ok();
+			} else if !boop.is_listened && entry.author() != self.author {
+				let is_ready = self.iroh.blobs().has(boop.blob_hash).await.unwrap_or(false);
+				log::debug!("Boop {}: audio blob {} presence: {}", boop.id, boop.blob_hash, is_ready);
+
+				boops.push(PendingBoopDto {
+					id: boop.id,
+					created: boop.created,
+					blob_hash: boop.blob_hash,
+					is_ready,
+					mime_type: boop.mime_type,
+				});
+			} else if entry.author() == self.author {
+				log::trace!("Skipping boop {} as it was authored by us", boop.id);
+			}
+		}
+		
 		let last_count = self.last_entry_count.swap(current_count, Ordering::SeqCst);
 		if current_count > last_count {
 			log::info!("New boops detected! Found {} potential boop metadata entries", current_count);
-		}
-		
-		let mut boops = Vec::new();
-		
-		while let Some(Ok(entry)) = entries.next() {
-			if let Ok(b) = self.iroh.blobs().get_bytes(entry.content_hash()).await {
-				if let Ok(boop) = Boop::from_bytes(b) {
-					if tombstones.contains(&boop.id.to_string()) && entry.author() == self.author {
-						// The recipient listened to it! Delete the doc entry.
-						log::info!("Garbage collecting boop {} due to tombstone", boop.id);
-						self.doc.del(self.author, entry.key().to_vec()).await.ok();
-					} else if !boop.is_listened && entry.author() != self.author {
-						let is_ready = self.iroh.blobs().has(boop.blob_hash).await.unwrap_or(false);
-						log::debug!("Boop {}: audio blob {} presence: {}", boop.id, boop.blob_hash, is_ready);
-
-						boops.push(PendingBoopDto {
-							id: boop.id,
-							created: boop.created,
-							blob_hash: boop.blob_hash,
-							is_ready,
-							mime_type: boop.mime_type,
-						});
-					} else if entry.author() == self.author {
-						log::trace!("Skipping boop {} as it was authored by us", boop.id);
-					}
-				}
-			} else {
-				log::warn!("Failed to get metadata blob {} for boop entry", entry.content_hash());
-			}
 		}
 		
 		boops.sort_by_key(|b| b.created);

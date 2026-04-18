@@ -28,14 +28,17 @@ impl ProtocolHandler for BoopHandshakeHandler {
 	fn accept(&self, connection: Connection) -> impl Future<Output = Result<(), AcceptError>> + Send {
 		let tx = self.tx.clone();
 		async move {
-			if let Ok(mut recv) = connection.accept_uni().await {
-				if let Ok(buf) = recv.read_to_end(2048).await {
-					if let Ok(payload) = serde_json::from_slice::<HandshakePayload>(&buf) {
-						// We got the payload, emit it to the app!
-						let _ = tx.send((payload.sender_endpoint_id, payload.doc_ticket));
-					}
-				}
-			}
+			let Ok((mut send, mut recv)) = connection.accept_bi().await else { return Ok(()); };
+			let Ok(buf) = recv.read_to_end(2048).await else { return Ok(()); };
+			let Ok(payload) = serde_json::from_slice::<HandshakePayload>(&buf) else { return Ok(()); };
+			
+			// We got the payload, emit it to the app!
+			let _ = tx.send((payload.sender_endpoint_id, payload.doc_ticket));
+			
+			// Acknowledge receipt
+			let _ = send.write_all(&[1]).await;
+			let _ = send.finish();
+			
 			Ok(())
 		}
 	}
@@ -130,7 +133,7 @@ impl IrohManager {
 	pub async fn dial_friend(&self, addr: impl Into<iroh::EndpointAddr>, doc_ticket: String) -> Result<()> {
 		let addr = addr.into();
 		let connection = self.endpoint.connect(addr, HANDSHAKE_ALPN).await?;
-		let mut send = connection.open_uni().await?;
+		let (mut send, mut recv) = connection.open_bi().await?;
 		
 		let my_id = self.endpoint_id;
 		
@@ -143,8 +146,9 @@ impl IrohManager {
 		send.write_all(&bytes).await?;
 		send.finish()?;
 		
-		// Give Bob a moment to process before dropping the connection
-		tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+		// Wait for ACK
+		let mut ack = [0u8; 1];
+		let _ = recv.read_exact(&mut ack).await;
 		
 		Ok(())
 	}
