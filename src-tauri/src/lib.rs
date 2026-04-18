@@ -99,7 +99,7 @@ pub fn run() {
             // fix mic permissions on linux. see: https://github.com/olizilla/boop/issues/2
             #[cfg(target_os = "linux")]
             {
-                use webkit2gtk::prelude::*;
+                use webkit2gtk::{PermissionRequestExt, SettingsExt, WebViewExt};
                 window.with_webview(|webview| {
                     let inner = webview.inner();
                     let settings = inner.settings().unwrap();
