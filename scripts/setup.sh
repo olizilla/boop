@@ -91,7 +91,8 @@ if [ "${MACHINE}" == "Linux" ]; then
             gstreamer1.0-plugins-good \
             gstreamer1.0-plugins-bad \
             gstreamer1.0-libav \
-            gstreamer1.0-tools
+            gstreamer1.0-tools \
+            gstreamer1.0-pulseaudio
     else
         echo -e "${YELLOW}Warning: Could not find apt-get. Please manually install the following dependencies:${NC}"
         echo "libwebkit2gtk-4.1-dev, build-essential, libssl-dev, libgtk-3-dev, libayatana-appindicator3-dev, librsvg2-dev"
