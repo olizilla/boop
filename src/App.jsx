@@ -1,6 +1,6 @@
 import { createSignal, onMount, onCleanup, Show, Match, Switch } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import { invoke, listen } from './tauri-bridge';
+import { invoke, listen, showWindow } from './tauri-bridge';
 import AddFriendView from './components/AddFriendView';
 import MyTicketView from './components/MyTicketView';
 
@@ -104,6 +104,8 @@ export default function App() {
 		});
 
 		await invoke('frontend_ready');
+		// fix ui glitch on linux on arm. see: https://github.com/olizilla/boop/issues/1
+		await showWindow();
 
 		onCleanup(() => {
 			if (typeof unlisten === 'function') unlisten();

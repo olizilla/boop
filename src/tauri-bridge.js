@@ -2,6 +2,7 @@
 
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import { listen as tauriListen } from '@tauri-apps/api/event';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 
 // To mock backend state in web
 let mockState = {
@@ -59,4 +60,11 @@ export const mockEmit = (payload) => {
     window.dispatchEvent(new CustomEvent('core-event', {
         detail: { payload }
     }));
+};
+// fix ui glitch on linux on arm. see: https://github.com/olizilla/boop/issues/1
+export const showWindow = async () => {
+    if (window.__TAURI_INTERNALS__) {
+        return getCurrentWebviewWindow().show();
+    }
+    console.log("[Mock] Window shown");
 };
