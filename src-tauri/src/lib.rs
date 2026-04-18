@@ -1,5 +1,7 @@
 use std::sync::Arc;
-use tauri::{State, Manager, TitleBarStyle, WebviewUrl, WebviewWindowBuilder, Emitter};
+use tauri::{State, Manager, WebviewUrl, WebviewWindowBuilder, Emitter};
+#[cfg(target_os = "macos")]
+use tauri::TitleBarStyle;
 use boop_core::{IrohManager, BoopEngine};
 
 pub struct AppState {
@@ -97,7 +99,7 @@ pub fn run() {
             // fix mic permissions on linux. see: https://github.com/olizilla/boop/issues/2
             #[cfg(target_os = "linux")]
             {
-                use webkit2gtk::traits::{PermissionRequestExt, SettingsExt, WebViewExt};
+                use webkit2gtk::prelude::*;
                 window.with_webview(|webview| {
                     let inner = webview.inner();
                     let settings = inner.settings().unwrap();
