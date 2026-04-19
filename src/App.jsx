@@ -253,17 +253,11 @@ export default function App() {
 				const audioBlob = new Blob(audioChunks, { type: sanitizedType });
 				const arrayBuffer = await audioBlob.arrayBuffer();
 				const bytes = new Uint8Array(arrayBuffer);
-				
-				if (bytes.length < 100) {
-					console.warn("Recording too short or empty, skipping send.");
-					return;
-				}
-
 				try {
 					await invoke('send_boop', { 
 						friendId: currentFriend().id, 
 						audioBytes: bytes, 
-						mimeType: mediaRecorder.mimeType 
+						mimeType: sanitizedType 
 					});
 				} catch(e) { console.error("Send failed", e); }
 				
