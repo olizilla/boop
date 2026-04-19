@@ -25,6 +25,7 @@ export default function App() {
 	let gettingStream = null;
 	let recordStartTime = 0;
 	let isBoopPressed = false;
+	let cooldownInterval = null;
 
 	const warmUpMic = async () => {
 		if (audioStream) return audioStream;
@@ -88,6 +89,10 @@ export default function App() {
 						if (!draft[fId]) draft[fId] = [];
 						draft[fId].push(payload.boop);
 					}));
+					if (status() === 'COOLDOWN') {
+						clearInterval(cooldownInterval);
+						setStatus('IDLE');
+					}
 					break;
 				case 'boopReady':
 					console.log("[CoreEvent] boopReady", payload);
@@ -98,6 +103,10 @@ export default function App() {
 							if (idx !== -1) arr[idx].is_ready = true;
 						}
 					}));
+					if (status() === 'COOLDOWN') {
+						clearInterval(cooldownInterval);
+						setStatus('IDLE');
+					}
 					break;
 				default:
 					break;
@@ -278,10 +287,11 @@ export default function App() {
 	const startCooldown = () => {
 		setStatus('COOLDOWN');
 		setCooldown(20);
-		const interval = setInterval(() => {
+		clearInterval(cooldownInterval);
+		cooldownInterval = setInterval(() => {
 			setCooldown(c => c - 1);
 			if (cooldown() <= 0) {
-				clearInterval(interval);
+				clearInterval(cooldownInterval);
 				setStatus('IDLE');
 			}
 		}, 1000);
