@@ -213,6 +213,10 @@ export default function App() {
 
 			// Debug log for PI troubleshooting
 			supportedTypes.forEach(t => console.log(`[Audio Debug] ${t} supported: ${MediaRecorder.isTypeSupported(t)}`));
+			
+			if (navigator.mediaCapabilities) {
+				console.log('[Media Debug] MediaCapabilities API available');
+			}
 
 			const selectedType = supportedTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
 			console.log(`[Audio Debug] Selected: ${selectedType || 'default'}`);
