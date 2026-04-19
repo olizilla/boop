@@ -105,8 +105,6 @@ pub fn run() {
                     let settings = inner.settings().unwrap();
                     settings.set_enable_media_stream(true);
                     settings.set_enable_webrtc(true);
-                    settings.set_enable_media_capabilities(true);
-                    settings.set_enable_mediasource(true);
                     inner.connect_permission_request(|_view, request| {
                         request.allow();
                         true

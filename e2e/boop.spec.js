@@ -50,4 +50,47 @@ test.describe('Boop E2E Recording Flow', () => {
     const screenDiv = page.locator('#screen');
     await expect(screenDiv).toHaveClass(/state-cooldown/);
   });
+
+  test('Playback flow for received boops', async ({ page }) => {
+    // 1. Visit the app and wait for hydration
+    await page.goto('/');
+    await page.waitForTimeout(500); // Wait for onMount to settle
+
+    const mockFriendId = "7ebd0062-1234-4567-8901-abcdef123456";
+    const mockBoopId = "boop-1234-5678";
+
+    // 2. Inject friend and pending boop atomically via a core-event (State Snapshot)
+    await page.evaluate(({ friendId, boopId }) => {
+      window.dispatchEvent(new CustomEvent('core-event', {
+        detail: { payload: { 
+          stateSnapshot: {
+            friends: [{ id: friendId, endpoint_id: "fake-id", nickname: "SimNode", emoji: "🤖" }],
+            pendingBoops: {
+              [friendId]: [{ id: boopId, created: Date.now(), blob_hash: "mock-hash", is_ready: true, mime_type: "audio/mp4" }]
+            } 
+          }
+        } }
+      }));
+    }, { friendId: mockFriendId, boopId: mockBoopId });
+
+    await expect(page.locator('#contact-nickname')).toHaveText('SimNode');
+
+    // UI should show "boops: 1 - tap to play" in the message status
+    await expect(page.locator('#message-status')).toContainText(/1 - tap to play/i);
+    await expect(page.locator('#btn-boop')).toHaveClass(/glow-effect/);
+
+    // 3. Click to Play
+    await page.click('#btn-boop');
+
+    // Should transition to PLAYING
+    await expect(page.locator('#message-status')).toContainText('playing...');
+    
+    // 4. Should return to IDLE after mocked playback ends (100ms)
+    await expect(page.locator('#message-status')).toContainText('hold red button', { timeout: 5000 });
+    
+    // Boop should be cleared (count 0 or text gone)
+    // Note: App.jsx hides the boop count when there are none
+    await expect(page.locator('#message-status')).not.toContainText('tap to play');
+    await expect(page.locator('#btn-boop')).not.toHaveClass(/glow-effect/);
+  });
 });

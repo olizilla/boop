@@ -77,7 +77,7 @@ if [ "${MACHINE}" == "Linux" ]; then
     if command -v apt-get &> /dev/null; then
         echo -e "${GREEN}Installing Linux system dependencies...${NC}"
         sudo apt-get update
-        # gstreamer good gives us webm. gstreamer bad gives us opus.
+        # Minimal GStreamer set for WebM/Opus recording and playback
         sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             build-essential \
@@ -88,11 +88,16 @@ if [ "${MACHINE}" == "Linux" ]; then
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
+            gstreamer1.0-plugins-base \
             gstreamer1.0-plugins-good \
-            gstreamer1.0-plugins-bad \
-            gstreamer1.0-libav \
-            gstreamer1.0-tools \
-            gstreamer1.0-pulseaudio
+            gstreamer1.0-pulseaudio \
+            gstreamer1.0-tools
+        
+        # Why these GStreamer plugins?
+        # - gstreamer1.0-plugins-base: Provides opusenc/opusparse (Opus audio)
+        # - gstreamer1.0-plugins-good: Provides matroskamux (WebM container)
+        # - gstreamer1.0-pulseaudio: Required for microphone access via PulseAudio/PipeWire
+        # - gstreamer1.0-tools: Provides gst-inspect-1.0 for diagnostics
     else
         echo -e "${YELLOW}Warning: Could not find apt-get. Please manually install the following dependencies:${NC}"
         echo "libwebkit2gtk-4.1-dev, build-essential, libssl-dev, libgtk-3-dev, libayatana-appindicator3-dev, librsvg2-dev"

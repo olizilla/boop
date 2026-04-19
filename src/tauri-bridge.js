@@ -36,6 +36,20 @@ export const invoke = async (cmd, args) => {
         return id;
     } else if (cmd === 'send_boop') {
         return Promise.resolve();
+    } else if (cmd === 'get_audio_bytes') {
+        // Generate a 1-second silent mono 8kHz WAV file
+        const header = new Uint8Array([
+            0x52, 0x49, 0x46, 0x46, 0x24, 0x1f, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45, 0x66, 0x6d, 0x74, 0x20,
+            0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x40, 0x1f, 0x00, 0x00, 0x40, 0x1f, 0x00, 0x00,
+            0x01, 0x00, 0x08, 0x00, 0x64, 0x61, 0x74, 0x61, 0x00, 0x1f, 0x00, 0x00
+        ]);
+        const data = new Uint8Array(8000).fill(0x80); // Silence for 8-bit PCM is 128 (0x80)
+        const wav = new Uint8Array(header.length + data.length);
+        wav.set(header);
+        wav.set(data, header.length);
+        return wav;
+    } else if (cmd === 'mark_listened') {
+        return Promise.resolve();
     }
     return null;
 };

@@ -19,6 +19,7 @@ export default function App() {
 
 	let audioStream = null;
 	let mediaRecorder = null;
+	let audioContext = null;
 	let audioChunks = [];
 	let audioTimeout = null;
 	let gettingStream = null;
@@ -167,27 +168,27 @@ export default function App() {
 			// Play
 			setStatus('PLAYING');
 			try {
+				if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+				await audioContext.resume();
+
 				const bytes = await invoke('get_audio_bytes', { friendId: friend.id, boopId: boopToPlay.blob_hash });
-				const sanitizedType = boopToPlay.mime_type.split(';')[0]; // see: https://github.com/olizilla/boop/issues/4
-				console.log('boop to play', boopToPlay.mime_type);
-				console.log('Mek blob type', sanitizedType);
-				const blob = new Blob([new Uint8Array(bytes)], { type: sanitizedType });
-				const url = URL.createObjectURL(blob);
-				console.log('Mek audio', url.substring(0, 60));
-				const audio = new Audio(url);
-				audio.onended = async () => {
+				const audioBuffer = await audioContext.decodeAudioData(new Uint8Array(bytes).buffer);
+				
+				const source = audioContext.createBufferSource();
+				source.buffer = audioBuffer;
+				source.connect(audioContext.destination);
+				
+				source.onended = async () => {
 					setStatus('IDLE');
 					await invoke('mark_listened', { friendId: friend.id, boopId: boopToPlay.id });
 					setPendingBoops(produce(draft => {
 						if (draft[friend.id]) draft[friend.id].shift();
 					}));
 				};
-				console.log('Play!')
-				await audio.play();
-				console.log('wtf!')
+				
+				source.start(0);
 			} catch (e) {
-				console.log('ERR!')
-				console.error(e);
+				console.error("Playback failed", e);
 				setStatus('IDLE');
 			}
 		} else {
@@ -212,14 +213,7 @@ export default function App() {
 			];
 
 			// Debug log for PI troubleshooting
-			supportedTypes.forEach(t => console.log(`[Audio Debug] ${t} supported: ${MediaRecorder.isTypeSupported(t)}`));
-			
-			if (navigator.mediaCapabilities) {
-				console.log('[Media Debug] MediaCapabilities API available');
-			}
-
 			const selectedType = supportedTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
-			console.log(`[Audio Debug] Selected: ${selectedType || 'default'}`);
 
 			mediaRecorder = selectedType 
 				? new MediaRecorder(audioStream, { mimeType: selectedType }) 
