@@ -172,7 +172,9 @@ export default function App() {
 				await audioContext.resume();
 
 				const bytes = await invoke('get_audio_bytes', { friendId: friend.id, boopId: boopToPlay.blob_hash });
-				const audioBuffer = await audioContext.decodeAudioData(new Uint8Array(bytes).buffer);
+				const uint8Array = new Uint8Array(bytes);
+				console.log(`[Playback] Attempting to decode ${uint8Array.length} bytes (${boopToPlay.mime_type})`);
+				const audioBuffer = await audioContext.decodeAudioData(uint8Array.buffer);
 				
 				const source = audioContext.createBufferSource();
 				source.buffer = audioBuffer;
@@ -189,7 +191,17 @@ export default function App() {
 				source.start(0);
 			} catch (e) {
 				console.error("Playback failed", e);
-				setStatus('IDLE');
+				setStatus('ERROR');
+				
+				// Mark as listened and remove so we don't get stuck on a bad boop
+				await invoke('mark_listened', { friendId: friend.id, boopId: boopToPlay.id });
+				setPendingBoops(produce(draft => {
+					if (draft[friend.id]) draft[friend.id].shift();
+				}));
+				
+				setTimeout(() => {
+					if (status() === 'ERROR') setStatus('IDLE');
+				}, 2000);
 			}
 		} else {
 			// Record
@@ -240,8 +252,13 @@ export default function App() {
 				const sanitizedType = mediaRecorder.mimeType.split(';')[0];
 				const audioBlob = new Blob(audioChunks, { type: sanitizedType });
 				const arrayBuffer = await audioBlob.arrayBuffer();
-				const bytes = Array.from(new Uint8Array(arrayBuffer));
+				const bytes = new Uint8Array(arrayBuffer);
 				
+				if (bytes.length < 100) {
+					console.warn("Recording too short or empty, skipping send.");
+					return;
+				}
+
 				try {
 					await invoke('send_boop', { 
 						friendId: currentFriend().id, 
@@ -336,6 +353,9 @@ export default function App() {
 									</Match>
 									<Match when={status() === 'PLAYING'}>
 										<span class="pulse">playing...</span>
+									</Match>
+									<Match when={status() === 'ERROR'}>
+										<span style="color: #ff4444">playback failed!</span>
 									</Match>
 									<Match when={(pendingBoops[currentFriend().id] || []).length > 0}>
 										<div class="pulse">
