@@ -7,8 +7,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
+use crate::player::BoopPlayer;
 use iroh_docs::engine::LiveEvent;
 use n0_future::StreamExt;
+use std::io::Cursor;
+use hound::WavReader;
+use flacenc::config;
+use flacenc::source::MemSource;
+use flacenc::error::Verify;
+use flacenc::component::BitRepr;
 
 #[derive(Clone)]
 pub struct BoopEngine {
@@ -17,6 +24,7 @@ pub struct BoopEngine {
     pub queues: Arc<Mutex<HashMap<uuid::Uuid, Arc<Mutex<BoopQueue>>>>>,
     pub address_book_path: PathBuf,
     pub event_tx: broadcast::Sender<CoreEvent>,
+    pub player: Arc<dyn BoopPlayer>,
 }
 
 impl BoopEngine {
@@ -24,6 +32,7 @@ impl BoopEngine {
         iroh: IrohManager,
         address_book_path: PathBuf,
         mut rx_handshake: tokio::sync::mpsc::UnboundedReceiver<(iroh::PublicKey, String)>,
+        player: Arc<dyn BoopPlayer>,
     ) -> Result<Self> {
         let address_book = if address_book_path.exists() {
             let json = tokio::fs::read_to_string(&address_book_path).await?;
@@ -45,6 +54,7 @@ impl BoopEngine {
             queues: queues.clone(),
             address_book_path: address_book_path.clone(),
             event_tx: event_tx.clone(),
+            player,
         };
 
         // Pre-warm queues for existing friends
@@ -79,7 +89,7 @@ impl BoopEngine {
         let is_existing = ab.friends.contains_key(&sender_endpoint);
         if !is_existing {
             let nickname = format!("Friend {}", &sender_endpoint.to_string()[..5]);
-            let id = ab.add_friend(nickname, sender_endpoint);
+            let _id = ab.add_friend(nickname, sender_endpoint);
             // Notify frontend
             if let Some(friend) = ab.friends.get(&sender_endpoint) {
                 let _ = self.event_tx.send(CoreEvent::FriendAdded { friend: friend.clone() });
@@ -119,7 +129,7 @@ impl BoopEngine {
             };
 
             while let Some(Ok(event)) = stream.next().await {
-                if let LiveEvent::InsertRemote { from, entry, .. } = event {
+                if let LiveEvent::InsertRemote { from: _, entry, .. } = event {
                     let key = entry.key().to_vec();
                     if let Ok(key_str) = String::from_utf8(key) {
                         log::debug!("InsertRemote: {}", key_str);
@@ -202,14 +212,14 @@ impl BoopEngine {
         &self,
         friend_id: uuid::Uuid,
         boop_id: uuid::Uuid,
-        entry: iroh_docs::Entry,
+        _entry: iroh_docs::Entry,
     ) {
         // Collect garbage
         if let Some(queue_arc) = self.queues.lock().await.get(&friend_id) {
             let queue = queue_arc.lock().await;
             
             // Delete the metadata
-            let boop_key = format!("boops/{:020}-{boop_id}", 0); // We'd need the created timestamp... or we can just list prefix
+            // let boop_key = format!("boops/{:020}-{boop_id}", 0); // We'd need the created timestamp... or we can just list prefix
             
             // Wait, we need the exact key to delete it. Let's just use queue.garbage_collect_tombstones()
             queue.garbage_collect_tombstones().await.ok();
@@ -290,7 +300,31 @@ impl BoopEngine {
         Ok(friend_id)
     }
 
-    pub async fn send_boop(&self, friend_id: uuid::Uuid, audio_bytes: Vec<u8>, mime_type: String) -> Result<()> {
+    pub async fn send_boop(&self, friend_id: uuid::Uuid, mut audio_bytes: Vec<u8>, mut mime_type: String) -> Result<()> {
+        if mime_type == "audio/wav" {
+            let start_size = audio_bytes.len();
+            let start_time = std::time::Instant::now();
+            
+            match encode_flac(&audio_bytes) {
+                Ok(flac_bytes) => {
+                    let end_size = flac_bytes.len();
+                    let duration = start_time.elapsed();
+                    let ratio = (end_size as f32 / start_size as f32) * 100.0;
+                    
+                    log::info!(
+                        "[Engine] Transcoded WAV to FLAC: {} bytes -> {} bytes ({:.1}% ratio) in {:?}",
+                        start_size, end_size, ratio, duration
+                    );
+                    
+                    audio_bytes = flac_bytes;
+                    mime_type = "audio/flac".to_string();
+                }
+                Err(e) => {
+                    log::error!("[Engine] FLAC transcoding failed, sending original WAV: {}", e);
+                }
+            }
+        }
+
         let queues = self.queues.lock().await;
         if let Some(queue_mtx) = queues.get(&friend_id) {
             let mut queue = queue_mtx.lock().await;
@@ -323,4 +357,56 @@ impl BoopEngine {
             Err(anyhow::anyhow!("Friend queue not initialized"))
         }
     }
+
+    pub async fn play_boop(&self, friend_id: uuid::Uuid, boop_id: uuid::Uuid) -> Result<()> {
+        let audio_bytes = {
+            let queues = self.queues.lock().await;
+            if let Some(queue_mtx) = queues.get(&friend_id) {
+                let queue = queue_mtx.lock().await;
+                // Find the boop to get its hash
+                let pending = queue.get_pending_boops().await?;
+                let boop = pending.iter().find(|b| b.id == boop_id)
+                    .ok_or_else(|| anyhow::anyhow!("Boop not found in pending queue"))?;
+                
+                queue.get_audio_bytes(boop.blob_hash).await?
+            } else {
+                return Err(anyhow::anyhow!("Friend queue not initialized"));
+            }
+        };
+
+        let _ = self.event_tx.send(CoreEvent::PlaybackStarted { friend_id, boop_id });
+        
+        // Play the audio. This blocks until playback finishes.
+        self.player.play(audio_bytes).await?;
+
+        // Automatically mark as listened
+        self.mark_listened(friend_id, boop_id).await?;
+
+        let _ = self.event_tx.send(CoreEvent::PlaybackFinished { friend_id, boop_id });
+        
+        Ok(())
+    }
+}
+
+fn encode_flac(wav_bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut reader = WavReader::new(Cursor::new(wav_bytes))?;
+    let spec = reader.spec();
+    
+    let samples: Vec<i32> = match spec.sample_format {
+        hound::SampleFormat::Int => {
+            reader.samples::<i32>().map(|s| s.unwrap()).collect()
+        },
+        hound::SampleFormat::Float => {
+            reader.samples::<f32>().map(|s| (s.unwrap() * 2147483647.0) as i32).collect()
+        },
+    };
+
+    let config = config::Encoder::default().into_verified().map_err(|e| anyhow::anyhow!("FLAC config error: {:?}", e))?;
+    let source = MemSource::from_samples(&samples, spec.channels as usize, spec.bits_per_sample as usize, spec.sample_rate as usize);
+    let stream = flacenc::encode_with_fixed_block_size(&config, source, config.block_size).map_err(|e| anyhow::anyhow!("FLAC encode error: {:?}", e))?;
+    
+    let mut sink = flacenc::bitsink::ByteSink::new();
+    let _ = stream.write(&mut sink);
+    
+    Ok(sink.into_inner())
 }

@@ -1,4 +1,5 @@
 import { createSignal, onMount, onCleanup, Show, Match, Switch } from 'solid-js';
+import { encodeWAV } from './audio';
 import { createStore, produce } from 'solid-js/store';
 import { invoke, listen, showWindow } from './tauri-bridge';
 import AddFriendView from './components/AddFriendView';
@@ -24,13 +25,21 @@ export default function App() {
 	let gettingStream = null;
 	let recordStartTime = 0;
 	let isBoopPressed = false;
+	let cooldownInterval = null;
+	let audioContext = null;
 
 	const warmUpMic = async () => {
 		if (audioStream) return audioStream;
 		if (gettingStream) return gettingStream;
 		
 		gettingStream = navigator.mediaDevices.getUserMedia({
-			audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 16000 }
+			audio: { 
+				channelCount: 1, 
+				echoCancellation: true, 
+				noiseSuppression: true, 
+				autoGainControl: true, 
+				sampleRate: 16000 
+			}
 		}).then(stream => {
 			audioStream = stream;
 			gettingStream = null;
@@ -87,6 +96,10 @@ export default function App() {
 						if (!draft[fId]) draft[fId] = [];
 						draft[fId].push(payload.boop);
 					}));
+					if (status() === 'COOLDOWN') {
+						clearInterval(cooldownInterval);
+						setStatus('IDLE');
+					}
 					break;
 				case 'boopReady':
 					console.log("[CoreEvent] boopReady", payload);
@@ -97,6 +110,10 @@ export default function App() {
 							if (idx !== -1) arr[idx].is_ready = true;
 						}
 					}));
+					if (status() === 'COOLDOWN') {
+						clearInterval(cooldownInterval);
+						setStatus('IDLE');
+					}
 					break;
 				default:
 					break;
@@ -164,24 +181,23 @@ export default function App() {
 				return; // Download handled by core automatically
 			}
 			
-			// Play
+			// Play via backend
 			setStatus('PLAYING');
 			try {
-				const bytes = await invoke('get_audio_bytes', { friendId: friend.id, boopId: boopToPlay.blob_hash });
-				const blob = new Blob([new Uint8Array(bytes)], { type: boopToPlay.mime_type });
-				const url = URL.createObjectURL(blob);
-				const audio = new Audio(url);
-				audio.onended = async () => {
-					setStatus('IDLE');
-					await invoke('mark_listened', { friendId: friend.id, boopId: boopToPlay.id });
-					setPendingBoops(produce(draft => {
-						if (draft[friend.id]) draft[friend.id].shift();
-					}));
-				};
-				audio.play();
-			} catch (e) {
-				console.error(e);
+				await invoke('play_boop', { friendId: friend.id, boopId: boopToPlay.id });
+				
+				// Backend returns only when playback finishes
+				setPendingBoops(produce(draft => {
+					if (draft[friend.id]) draft[friend.id].shift();
+				}));
 				setStatus('IDLE');
+			} catch (e) {
+				console.error("Playback failed", e);
+				setStatus('ERROR');
+				
+				setTimeout(() => {
+					if (status() === 'ERROR') setStatus('IDLE');
+				}, 2000);
 			}
 		} else {
 			// Record
@@ -195,9 +211,19 @@ export default function App() {
 		try {
 			await warmUpMic();
 			
-			const options = { mimeType: 'audio/webm;codecs=opus' };
-			mediaRecorder = MediaRecorder.isTypeSupported(options.mimeType) 
-				? new MediaRecorder(audioStream, options) 
+			const supportedTypes = [
+				'audio/webm;codecs=opus',
+				'audio/webm',
+				'audio/mp4',
+				'audio/ogg;codecs=opus',
+				'audio/ogg'
+			];
+
+			// Debug log for PI troubleshooting
+			const selectedType = supportedTypes.find(type => MediaRecorder.isTypeSupported(type)) || '';
+
+			mediaRecorder = selectedType 
+				? new MediaRecorder(audioStream, { mimeType: selectedType }) 
 				: new MediaRecorder(audioStream);
 
 			audioChunks = [];
@@ -217,19 +243,40 @@ export default function App() {
 			};
 
 			mediaRecorder.onstop = async () => {
-				const audioBlob = new Blob(audioChunks);
-				const arrayBuffer = await audioBlob.arrayBuffer();
-				const bytes = Array.from(new Uint8Array(arrayBuffer));
+				const sanitizedType = mediaRecorder.mimeType.split(';')[0];
+				const originalBlob = new Blob(audioChunks, { type: sanitizedType });
+				const originalBuffer = await originalBlob.arrayBuffer();
 				
+				console.log(`[Recording] Original size: ${originalBuffer.byteLength} bytes (${sanitizedType})`);
+
+				// Transcode to WAV (Mono, 16-bit PCM)
+				let finalBytes;
+				let finalType = 'audio/wav';
+				try {
+					if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+					const audioBuffer = await audioContext.decodeAudioData(originalBuffer);
+					finalBytes = encodeWAV(audioBuffer);
+					console.log(`[Recording] Transcoded to WAV. Size: ${finalBytes.length} bytes. Mono @ ${audioBuffer.sampleRate}Hz`);
+				} catch (e) {
+					console.error("[Recording] Transcoding failed, falling back to original blob", e);
+					finalBytes = new Uint8Array(originalBuffer);
+					finalType = sanitizedType;
+				}
+
+				if (finalBytes.length < 100) {
+					console.warn("[Recording] Data too small, ignoring.");
+					setStatus('IDLE');
+					return;
+				}
+
 				try {
 					await invoke('send_boop', { 
 						friendId: currentFriend().id, 
-						audioBytes: bytes, 
-						mimeType: mediaRecorder.mimeType 
+						audioBytes: Array.from(finalBytes), 
+						mimeType: finalType 
 					});
 				} catch(e) { console.error("Send failed", e); }
 				
-				// We no longer stop the tracks here so the stream stays warm!
 				startCooldown();
 			};
 			mediaRecorder.start();
@@ -246,10 +293,11 @@ export default function App() {
 	const startCooldown = () => {
 		setStatus('COOLDOWN');
 		setCooldown(20);
-		const interval = setInterval(() => {
+		clearInterval(cooldownInterval);
+		cooldownInterval = setInterval(() => {
 			setCooldown(c => c - 1);
 			if (cooldown() <= 0) {
-				clearInterval(interval);
+				clearInterval(cooldownInterval);
 				setStatus('IDLE');
 			}
 		}, 1000);
@@ -267,7 +315,10 @@ export default function App() {
 						if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
 					}, 1000 - elapsed);
 				} else {
-					mediaRecorder.stop();
+					// Add a small buffer delay (500ms) to ensure the last bit of audio is captured
+					setTimeout(() => {
+						if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+					}, 300);
 				}
 			}
 			// If WAKING_MIC, we let the onstart callback handle the 1s wrap-up
@@ -315,6 +366,9 @@ export default function App() {
 									</Match>
 									<Match when={status() === 'PLAYING'}>
 										<span class="pulse">playing...</span>
+									</Match>
+									<Match when={status() === 'ERROR'}>
+										<span style="color: #ff4444">playback failed!</span>
 									</Match>
 									<Match when={(pendingBoops[currentFriend().id] || []).length > 0}>
 										<div class="pulse">

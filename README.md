@@ -10,16 +10,16 @@ We once had copper wires between every home, and if we were bored at home, we'd 
 ## Cosy stack
 Friends that made this possible:
 - **[Iroh](https://iroh.computer/)**: Fancy peer-to-peer networkinging magic.
-- **[Tauri](https://tauri.app/)**: The app wrap that lets us use web platform to boop some audio.
+- **[Tauri](https://tauri.app/)**: The app wrap that lets us use the web platform for our UI.
+- **[Rodio](https://github.com/RustAudio/rodio)**: Native Rust audio playback for maximum reliability.
 
 ## How it Works:
-1. You record a voice message. The audio is stored locally as a .webm file.
-2. The application creates a JSON record for the message with the hash
-  of the audio file.
-3. This record is synced with your friends's device using `iroh-docs`, a
-  a CRDT-based document synchronization system.
-4. Your friends's booper detects the new record and fetches the audio from you using `iroh-blobs`.
-5. Once the message is listened to, a "listened" receipt is sent back, and both boopers candelete the audio file to keep things neat.
+1. You record a voice message in the UI. It's encoded as a high-quality **WAV** in the browser.
+2. The WAV bytes are sent to the Rust backend, where they are transcoded to **FLAC** for efficient storage and transfer.
+3. The application creates a JSON record for the message with the hash of the FLAC blob.
+4. This record is synced with your friend's device using `iroh-docs`, a CRDT-based document synchronization system.
+5. Your friend's booper detects the new record and fetches the audio from you using `iroh-blobs`.
+6. Once the message is listened to (using native system audio), a "listened" receipt is sent back, and both boopers delete the audio to keep things neat.
 
 More detail in the [Boop Blob Sync doc](docs/boop_blob_sync_design.md)
 

@@ -77,6 +77,7 @@ if [ "${MACHINE}" == "Linux" ]; then
     if command -v apt-get &> /dev/null; then
         echo -e "${GREEN}Installing Linux system dependencies...${NC}"
         sudo apt-get update
+        # Dependencies for Tauri, ALSA (for rodio), and GStreamer (for webview recording)
         sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             build-essential \
@@ -86,7 +87,17 @@ if [ "${MACHINE}" == "Linux" ]; then
             libssl-dev \
             libgtk-3-dev \
             libayatana-appindicator3-dev \
-            librsvg2-dev
+            librsvg2-dev \
+            libasound2-dev \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-pulseaudio \
+            gstreamer1.0-tools
+        
+        # Why these dependencies?
+        # - libasound2-dev: Required for native audio playback via rodio/ALSA
+        # - gstreamer1.0-plugins-bad: Required for AAC/MP4 encoding in WebkitGTK
+        # - gstreamer1.0-pulseaudio: Required for microphone access via PulseAudio/PipeWire
+        # - gstreamer1.0-tools: Provides gst-inspect-1.0 for diagnostics
     else
         echo -e "${YELLOW}Warning: Could not find apt-get. Please manually install the following dependencies:${NC}"
         echo "libwebkit2gtk-4.1-dev, build-essential, libssl-dev, libgtk-3-dev, libayatana-appindicator3-dev, librsvg2-dev"

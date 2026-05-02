@@ -2,10 +2,56 @@ use std::sync::Arc;
 use tauri::{State, Manager, WebviewUrl, WebviewWindowBuilder, Emitter};
 #[cfg(target_os = "macos")]
 use tauri::TitleBarStyle;
-use boop_core::{IrohManager, BoopEngine};
+use boop_core::{IrohManager, BoopEngine, BoopPlayer};
 
 pub struct AppState {
     pub engine: Arc<BoopEngine>,
+}
+
+struct TauriBoopPlayer;
+
+#[async_trait::async_trait]
+impl BoopPlayer for TauriBoopPlayer {
+    async fn play(&self, audio_bytes: Vec<u8>) -> anyhow::Result<()> {
+        let len = audio_bytes.len();
+        log::info!("Attempting to play audio: {} bytes", len);
+        
+        if len < 100 {
+            anyhow::bail!("Audio data too small ({} bytes)", len);
+        }
+
+        let result = tokio::task::spawn_blocking(move || {
+            let cursor = std::io::Cursor::new(audio_bytes);
+            let (_stream, stream_handle) = rodio::OutputStream::try_default()?;
+            let sink = rodio::Sink::try_new(&stream_handle)?;
+            let source = rodio::Decoder::new(cursor)?;
+            sink.append(source);
+            sink.sleep_until_end();
+            Ok::<(), anyhow::Error>(())
+        }).await;
+        
+        match result {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => {
+                log::error!("Playback error: {}", e);
+                Err(e)
+            }
+            Err(e) => {
+                if e.is_panic() {
+                    log::error!("Audio decoder panicked! Data might be malformed or incompatible.");
+                    anyhow::bail!("Audio decoder panicked");
+                } else {
+                    Err(e.into())
+                }
+            }
+        }
+    }
+
+    async fn stop(&self) -> anyhow::Result<()> {
+        // Stop current playback (global pkill ffplay was used before, 
+        // with rodio we'd need to store the sink to stop it specifically)
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -25,6 +71,13 @@ async fn send_boop(state: State<'_, Arc<AppState>>, friend_id: String, audio_byt
     log::info!("Recording finished! Queueing a new boop for friend id {} ({})", friend_id, mime_type);
     let f_id = friend_id.parse().map_err(|e: uuid::Error| e.to_string())?;
     state.engine.send_boop(f_id, audio_bytes, mime_type).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn play_boop(state: State<'_, Arc<AppState>>, friend_id: String, boop_id: String) -> Result<(), String> {
+    let f_id = friend_id.parse().map_err(|e: uuid::Error| e.to_string())?;
+    let b_id = boop_id.parse().map_err(|e: uuid::Error| e.to_string())?;
+    state.engine.play_boop(f_id, b_id).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -122,7 +175,8 @@ pub fn run() {
                 
                 let (iroh, rx) = IrohManager::new(iroh_dir, false).await.expect("failed to init iroh");
                 
-                let engine = BoopEngine::new(iroh, address_book_path, rx).await.expect("Failed to create engine");
+                let player = Arc::new(TauriBoopPlayer);
+                let engine = BoopEngine::new(iroh, address_book_path, rx, player).await.expect("Failed to create engine");
                 let event_rx = engine.event_tx.subscribe();
                 (engine, event_rx)
             });
@@ -145,6 +199,7 @@ pub fn run() {
             get_my_endpoint,
             add_friend,
             send_boop,
+            play_boop,
             get_audio_bytes,
             mark_listened,
             frontend_ready

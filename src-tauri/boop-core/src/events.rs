@@ -29,4 +29,12 @@ pub enum CoreEvent {
     PeerConnected {
         friend_id: uuid::Uuid,
     },
+    PlaybackStarted {
+        friend_id: uuid::Uuid,
+        boop_id: uuid::Uuid,
+    },
+    PlaybackFinished {
+        friend_id: uuid::Uuid,
+        boop_id: uuid::Uuid,
+    },
 }
