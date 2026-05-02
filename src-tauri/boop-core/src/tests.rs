@@ -7,6 +7,8 @@ mod integration_tests {
     use tempfile::tempdir;
     use std::sync::Arc;
     use async_trait::async_trait;
+    use n0_future::StreamExt;
+    use std::str::FromStr;
 
     struct MockPlayer;
     #[async_trait]
@@ -119,5 +121,65 @@ mod integration_tests {
         let key = format!("listened/{}", boop_id);
         let entry = doc.get_one(iroh_docs::store::Query::key_exact(key)).await.unwrap();
         assert!(entry.is_some(), "Tombstone should exist after playback");
+    }
+
+    #[tokio::test]
+    async fn test_send_boop_transcodes_wav_to_flac() {
+        let dir = tempdir().unwrap();
+        let iroh_dir = dir.path().join("iroh");
+        let addr_book = dir.path().join("friends.json");
+        let (iroh, rx) = IrohManager::new(iroh_dir, true).await.unwrap();
+        let player = Arc::new(MockPlayer);
+        let engine = BoopEngine::new(iroh.clone(), addr_book, rx, player).await.unwrap();
+
+        let friend_id = uuid::Uuid::new_v4();
+        
+        // Mock a queue for this friend
+        let queue = crate::iroh_boops::BoopQueue::new(None, iroh.clone()).await.unwrap();
+        let queue_arc = Arc::new(tokio::sync::Mutex::new(queue));
+        engine.queues.lock().await.insert(friend_id, queue_arc.clone());
+
+        // Create a valid 1s mono 16kHz WAV
+        let mut wav_bytes = Vec::new();
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 16000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        {
+            let mut writer = hound::WavWriter::new(std::io::Cursor::new(&mut wav_bytes), spec).unwrap();
+            for i in 0..16000 {
+                writer.write_sample(((i as f32).sin() * 32767.0) as i16).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+        let original_size = wav_bytes.len();
+
+        // Send the WAV boop
+        engine.send_boop(friend_id, wav_bytes, "audio/wav".to_string()).await.unwrap();
+
+        // Verify it was stored as FLAC
+        let _pending = {
+            let q = queue_arc.lock().await;
+            q.get_pending_boops().await.unwrap()
+        };
+        
+        // Note: The MockPlayer/integration logic in get_pending_boops filters out 
+        // boops authored by us. So we might need to look at the doc directly or 
+        // use a different author for the send if we want to use get_pending_boops.
+        // Actually, we can just check the last entry in the doc.
+        let q = queue_arc.lock().await;
+        let entries = q.doc().get_many(iroh_docs::store::Query::key_prefix("boops/")).await.unwrap();
+        tokio::pin!(entries);
+        let entry = entries.next().await.unwrap().unwrap();
+        let content = iroh.blobs().get_bytes(entry.content_hash()).await.unwrap();
+        let boop: crate::iroh_boops::Boop = serde_json::from_slice(&content).unwrap();
+        
+        assert_eq!(boop.mime_type, "audio/flac");
+        assert!(boop.blob_hash != iroh_blobs::Hash::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap());
+        
+        let audio_bytes = iroh.blobs().get_bytes(boop.blob_hash).await.unwrap();
+        assert!(audio_bytes.len() < original_size, "FLAC should be smaller than WAV");
     }
 }

@@ -10,6 +10,12 @@ use tokio::sync::{broadcast, Mutex};
 use crate::player::BoopPlayer;
 use iroh_docs::engine::LiveEvent;
 use n0_future::StreamExt;
+use std::io::Cursor;
+use hound::WavReader;
+use flacenc::config;
+use flacenc::source::MemSource;
+use flacenc::error::Verify;
+use flacenc::component::BitRepr;
 
 #[derive(Clone)]
 pub struct BoopEngine {
@@ -294,7 +300,31 @@ impl BoopEngine {
         Ok(friend_id)
     }
 
-    pub async fn send_boop(&self, friend_id: uuid::Uuid, audio_bytes: Vec<u8>, mime_type: String) -> Result<()> {
+    pub async fn send_boop(&self, friend_id: uuid::Uuid, mut audio_bytes: Vec<u8>, mut mime_type: String) -> Result<()> {
+        if mime_type == "audio/wav" {
+            let start_size = audio_bytes.len();
+            let start_time = std::time::Instant::now();
+            
+            match encode_flac(&audio_bytes) {
+                Ok(flac_bytes) => {
+                    let end_size = flac_bytes.len();
+                    let duration = start_time.elapsed();
+                    let ratio = (end_size as f32 / start_size as f32) * 100.0;
+                    
+                    log::info!(
+                        "[Engine] Transcoded WAV to FLAC: {} bytes -> {} bytes ({:.1}% ratio) in {:?}",
+                        start_size, end_size, ratio, duration
+                    );
+                    
+                    audio_bytes = flac_bytes;
+                    mime_type = "audio/flac".to_string();
+                }
+                Err(e) => {
+                    log::error!("[Engine] FLAC transcoding failed, sending original WAV: {}", e);
+                }
+            }
+        }
+
         let queues = self.queues.lock().await;
         if let Some(queue_mtx) = queues.get(&friend_id) {
             let mut queue = queue_mtx.lock().await;
@@ -356,4 +386,27 @@ impl BoopEngine {
         
         Ok(())
     }
+}
+
+fn encode_flac(wav_bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut reader = WavReader::new(Cursor::new(wav_bytes))?;
+    let spec = reader.spec();
+    
+    let samples: Vec<i32> = match spec.sample_format {
+        hound::SampleFormat::Int => {
+            reader.samples::<i32>().map(|s| s.unwrap()).collect()
+        },
+        hound::SampleFormat::Float => {
+            reader.samples::<f32>().map(|s| (s.unwrap() * 2147483647.0) as i32).collect()
+        },
+    };
+
+    let config = config::Encoder::default().into_verified().map_err(|e| anyhow::anyhow!("FLAC config error: {:?}", e))?;
+    let source = MemSource::from_samples(&samples, spec.channels as usize, spec.bits_per_sample as usize, spec.sample_rate as usize);
+    let stream = flacenc::encode_with_fixed_block_size(&config, source, config.block_size).map_err(|e| anyhow::anyhow!("FLAC encode error: {:?}", e))?;
+    
+    let mut sink = flacenc::bitsink::ByteSink::new();
+    let _ = stream.write(&mut sink);
+    
+    Ok(sink.into_inner())
 }
