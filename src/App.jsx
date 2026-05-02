@@ -315,7 +315,10 @@ export default function App() {
 						if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
 					}, 1000 - elapsed);
 				} else {
-					mediaRecorder.stop();
+					// Add a small buffer delay (500ms) to ensure the last bit of audio is captured
+					setTimeout(() => {
+						if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+					}, 300);
 				}
 			}
 			// If WAKING_MIC, we let the onstart callback handle the 1s wrap-up
