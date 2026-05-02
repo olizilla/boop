@@ -9,7 +9,7 @@ The architecture is divided into strictly decoupled layers. Each layer is respon
 ### 1. `iroh` (Networking & Database Layer)
 The foundation of Boop is built on `iroh-docs` and `iroh-blobs`.
 * **Docs (Metadata)**: Small JSON structs representing Boops are synchronized automatically across peers via CRDT-based documents.
-* **Blobs (Audio)**: Large raw audio blobs (`WebM`/`Opus`) are fetched independently by explicitly exchanging Blake3 Hashes.
+* **Blobs (Audio)**: Large raw audio blobs (`FLAC`) are fetched independently by explicitly exchanging Blake3 Hashes.
 * **Handshakes**: Core endpoints locate friends securely using `ALPN` handshake side-channels over QUIC streams.
 
 ### 2. `boop-core` (State Management & Event Engine)
@@ -49,10 +49,10 @@ Below is the execution flow, structured chronologically from starting the UI, es
    - Both engines trigger internal streams cascading a `CoreEvent::FriendAdded` mapping securely down the pipeline into the local UI tracking loops updating lists flawlessly.
 
 ### 3. Record & Send (Node A)
-   - Node A clicks "Boop" and records audio.
-   - Frontend calls `invoke('send_boop', { audio_bytes })`.
-   - `BoopEngine` adds audio to `iroh-blobs` natively.
-   - `BoopEngine` creates a `PendingBoopDto` metadata struct with the blob hash and natively `set_bytes` into the shared Iroh `Doc`.
+   - Node A clicks "Boop" and records audio. 
+   - Frontend converts the recording to **WAV** and calls `invoke('send_boop', { friendId, audioBytes, mimeType: "audio/wav" })`.
+   - `BoopEngine` receives the WAV, transcodes it to **FLAC** and adds it to `iroh-blobs`.
+   - `BoopEngine` creates a `Boop` metadata struct with the blob hash and `mime_type: "audio/flac"`, and `set_bytes` into the shared Iroh `Doc`.
 
 ### 4. Sync & Fetch (Node B)
    - Node B's `BoopQueue` background listener natively receives `LiveEvent::InsertRemote`.
@@ -67,8 +67,10 @@ Below is the execution flow, structured chronologically from starting the UI, es
 
 ### 6. Playback & Cleanup (Node B)
    - Node B clicks to play.
-   - Frontend invokes `invoke('get_audio_bytes')`. It streams natively and plays locally over `Audio`.
-   - On completion, frontend invokes `invoke('mark_listened')`.
+   - Frontend invokes `invoke('play_boop', { friendId, boopId })`.
+   - `BoopEngine` retrieves the FLAC bytes, emits `CoreEvent::PlaybackStarted`, and plays them natively using **`rodio`**.
+   - When playback finishes, `BoopEngine` emits `CoreEvent::PlaybackFinished`.
+   - **Automated Cleanup**: Immediately after playback, `BoopEngine` calls `mark_listened` internally.
    - Node B's engine places a CRDT `tombstone` in the `listened/` path of the shared Doc, signaling Node A to garbage collect the entry.
 
 ---

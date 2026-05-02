@@ -5,16 +5,17 @@ This design utilizes `iroh-docs` for metadata CRDT sync and `iroh-blobs` for hea
 ## Storage & Document Structure
 Each conversation (friendship) shares exactly **1 Iroh Document**. Both users (A and B) subscribe and write to this single doc. Iroh's CRDT engine resolves concurrent edits natively using built-in timestamping and AuthorIDs.
 
-Documents store structured JSON Metadata in keys, whereas the actual `.webm` files are placed exclusively in the `iroh-blobs` content-addressed storage (CAS) engine.
+Documents store structured JSON Metadata in keys, whereas the actual `.flac` files are content addressed and shared via `iroh-blobs`. The blob hash is included in the metadata.
 
 ## Lifecycle of a Boop
 
 ### 1. Recording (User A)
-- User A records a new voice note. The raw audio `.webm` buffer is sent to Rust.
-- **Blob Storage:** Rust directly inserts the audio into the local `iroh-blobs` backend using standard storage (`store.add_bytes()`). This produces a BLAKE3 `BlobHash`.
+- User A records a new voice note as **WAV** in the UI and sent to Rust.
+- **Transcoding:** Rust transcodes the WAV to **FLAC** to be smol.
+- **Blob Storage:** Rust directly inserts the FLAC audio into the local `iroh-blobs` backend using standard storage (`store.add_bytes()`). This produces a BLAKE3 `BlobHash`.
 - **Metadata Notification:** Rust crafts a JSON payload referencing this new boop: 
   ```json
-  { "id": "uuid-123", "blob_hash": "bafkr..." }
+  { "id": "uuid-123", "blob_hash": "bafkr...", "mime_type": "audio/flac" }
   ```
 - **KV Insert:** The JSON payload is inserted into the shared Iroh Doc using a sortable composite key: `boops/<timestamp>-<uuid>`. 
   - (Because keys are lexicographically ordered, ordering by timestamp makes fetching "next-to-play" naturally trivial for UI).
@@ -32,7 +33,7 @@ Because of CRDT semantics, User B cannot simply delete an entry authored by User
 
 1. User B listens to the Boop.
 2. User B writes a receipt key to the shared document: `listened/<uuid>`.
-3. User B deletes the `.webm` payload from their local `iroh-blobs` storage.
+3. User B deletes the `.flac` payload from their local `iroh-blobs` storage.
 4. User A's node observes the `listened/<uuid>` key pop up! 
-5. User A realizes their message was read, so User A deletes the original `.webm` payload from their local `iroh-blobs` storage.
+5. User A realizes their message was read, so User A deletes the original `.flac` payload from their local `iroh-blobs` storage.
 6. User A deletes the original `boops/*` entry, and deletes Bob's `listened/*` entry, scrubbing the history completely clean!
