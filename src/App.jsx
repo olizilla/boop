@@ -1,4 +1,5 @@
 import { createSignal, onMount, onCleanup, Show, Match, Switch } from 'solid-js';
+import { encodeWAV } from './audio';
 import { createStore, produce } from 'solid-js/store';
 import { invoke, listen, showWindow } from './tauri-bridge';
 import AddFriendView from './components/AddFriendView';
@@ -19,20 +20,26 @@ export default function App() {
 
 	let audioStream = null;
 	let mediaRecorder = null;
-	let audioContext = null;
 	let audioChunks = [];
 	let audioTimeout = null;
 	let gettingStream = null;
 	let recordStartTime = 0;
 	let isBoopPressed = false;
 	let cooldownInterval = null;
+	let audioContext = null;
 
 	const warmUpMic = async () => {
 		if (audioStream) return audioStream;
 		if (gettingStream) return gettingStream;
 		
 		gettingStream = navigator.mediaDevices.getUserMedia({
-			audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 16000 }
+			audio: { 
+				channelCount: 1, 
+				echoCancellation: true, 
+				noiseSuppression: true, 
+				autoGainControl: true, 
+				sampleRate: 16000 
+			}
 		}).then(stream => {
 			audioStream = stream;
 			gettingStream = null;
@@ -174,39 +181,19 @@ export default function App() {
 				return; // Download handled by core automatically
 			}
 			
-			// Play
+			// Play via backend
 			setStatus('PLAYING');
 			try {
-				if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-				await audioContext.resume();
-
-				const bytes = await invoke('get_audio_bytes', { friendId: friend.id, boopId: boopToPlay.blob_hash });
-				const uint8Array = new Uint8Array(bytes);
-				console.log(`[Playback] Attempting to decode ${uint8Array.length} bytes (${boopToPlay.mime_type})`);
-				const audioBuffer = await audioContext.decodeAudioData(uint8Array.buffer);
+				await invoke('play_boop', { friendId: friend.id, boopId: boopToPlay.id });
 				
-				const source = audioContext.createBufferSource();
-				source.buffer = audioBuffer;
-				source.connect(audioContext.destination);
-				
-				source.onended = async () => {
-					setStatus('IDLE');
-					await invoke('mark_listened', { friendId: friend.id, boopId: boopToPlay.id });
-					setPendingBoops(produce(draft => {
-						if (draft[friend.id]) draft[friend.id].shift();
-					}));
-				};
-				
-				source.start(0);
-			} catch (e) {
-				console.error("Playback failed", e);
-				setStatus('ERROR');
-				
-				// Mark as listened and remove so we don't get stuck on a bad boop
-				await invoke('mark_listened', { friendId: friend.id, boopId: boopToPlay.id });
+				// Backend returns only when playback finishes
 				setPendingBoops(produce(draft => {
 					if (draft[friend.id]) draft[friend.id].shift();
 				}));
+				setStatus('IDLE');
+			} catch (e) {
+				console.error("Playback failed", e);
+				setStatus('ERROR');
 				
 				setTimeout(() => {
 					if (status() === 'ERROR') setStatus('IDLE');
@@ -224,13 +211,12 @@ export default function App() {
 		try {
 			await warmUpMic();
 			
-			
 			const supportedTypes = [
 				'audio/webm;codecs=opus',
 				'audio/webm',
+				'audio/mp4',
 				'audio/ogg;codecs=opus',
-				'audio/ogg',
-				'audio/mp4'
+				'audio/ogg'
 			];
 
 			// Debug log for PI troubleshooting
@@ -257,20 +243,40 @@ export default function App() {
 			};
 
 			mediaRecorder.onstop = async () => {
-				// Ensure the blob is typed with the actual recorder mimeType (without codecs for max compatibility)
 				const sanitizedType = mediaRecorder.mimeType.split(';')[0];
-				const audioBlob = new Blob(audioChunks, { type: sanitizedType });
-				const arrayBuffer = await audioBlob.arrayBuffer();
-				const bytes = new Uint8Array(arrayBuffer);
+				const originalBlob = new Blob(audioChunks, { type: sanitizedType });
+				const originalBuffer = await originalBlob.arrayBuffer();
+				
+				console.log(`[Recording] Original size: ${originalBuffer.byteLength} bytes (${sanitizedType})`);
+
+				// Transcode to WAV (Mono, 16-bit PCM)
+				let finalBytes;
+				let finalType = 'audio/wav';
+				try {
+					if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+					const audioBuffer = await audioContext.decodeAudioData(originalBuffer);
+					finalBytes = encodeWAV(audioBuffer);
+					console.log(`[Recording] Transcoded to WAV. Size: ${finalBytes.length} bytes. Mono @ ${audioBuffer.sampleRate}Hz`);
+				} catch (e) {
+					console.error("[Recording] Transcoding failed, falling back to original blob", e);
+					finalBytes = new Uint8Array(originalBuffer);
+					finalType = sanitizedType;
+				}
+
+				if (finalBytes.length < 100) {
+					console.warn("[Recording] Data too small, ignoring.");
+					setStatus('IDLE');
+					return;
+				}
+
 				try {
 					await invoke('send_boop', { 
 						friendId: currentFriend().id, 
-						audioBytes: bytes, 
-						mimeType: sanitizedType 
+						audioBytes: Array.from(finalBytes), 
+						mimeType: finalType 
 					});
 				} catch(e) { console.error("Send failed", e); }
 				
-				// We no longer stop the tracks here so the stream stays warm!
 				startCooldown();
 			};
 			mediaRecorder.start();

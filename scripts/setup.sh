@@ -77,7 +77,7 @@ if [ "${MACHINE}" == "Linux" ]; then
     if command -v apt-get &> /dev/null; then
         echo -e "${GREEN}Installing Linux system dependencies...${NC}"
         sudo apt-get update
-        # Minimal GStreamer set for WebM/Opus recording and playback
+        # Dependencies for Tauri, ALSA (for rodio), and GStreamer (for webview recording)
         sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             build-essential \
@@ -88,14 +88,14 @@ if [ "${MACHINE}" == "Linux" ]; then
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
-            gstreamer1.0-plugins-base \
-            gstreamer1.0-plugins-good \
+            libasound2-dev \
+            gstreamer1.0-plugins-bad \
             gstreamer1.0-pulseaudio \
             gstreamer1.0-tools
         
-        # Why these GStreamer plugins?
-        # - gstreamer1.0-plugins-base: Provides opusenc/opusparse (Opus audio)
-        # - gstreamer1.0-plugins-good: Provides matroskamux (WebM container)
+        # Why these dependencies?
+        # - libasound2-dev: Required for native audio playback via rodio/ALSA
+        # - gstreamer1.0-plugins-bad: Required for AAC/MP4 encoding in WebkitGTK
         # - gstreamer1.0-pulseaudio: Required for microphone access via PulseAudio/PipeWire
         # - gstreamer1.0-tools: Provides gst-inspect-1.0 for diagnostics
     else

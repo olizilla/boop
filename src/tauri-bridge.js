@@ -50,6 +50,8 @@ export const invoke = async (cmd, args) => {
         return wav;
     } else if (cmd === 'mark_listened') {
         return Promise.resolve();
+    } else if (cmd === 'play_boop') {
+        return new Promise(resolve => setTimeout(resolve, 500));
     }
     return null;
 };

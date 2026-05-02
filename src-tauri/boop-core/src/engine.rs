@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
+use crate::player::BoopPlayer;
 use iroh_docs::engine::LiveEvent;
 use n0_future::StreamExt;
 
@@ -17,6 +18,7 @@ pub struct BoopEngine {
     pub queues: Arc<Mutex<HashMap<uuid::Uuid, Arc<Mutex<BoopQueue>>>>>,
     pub address_book_path: PathBuf,
     pub event_tx: broadcast::Sender<CoreEvent>,
+    pub player: Arc<dyn BoopPlayer>,
 }
 
 impl BoopEngine {
@@ -24,6 +26,7 @@ impl BoopEngine {
         iroh: IrohManager,
         address_book_path: PathBuf,
         mut rx_handshake: tokio::sync::mpsc::UnboundedReceiver<(iroh::PublicKey, String)>,
+        player: Arc<dyn BoopPlayer>,
     ) -> Result<Self> {
         let address_book = if address_book_path.exists() {
             let json = tokio::fs::read_to_string(&address_book_path).await?;
@@ -45,6 +48,7 @@ impl BoopEngine {
             queues: queues.clone(),
             address_book_path: address_book_path.clone(),
             event_tx: event_tx.clone(),
+            player,
         };
 
         // Pre-warm queues for existing friends
@@ -79,7 +83,7 @@ impl BoopEngine {
         let is_existing = ab.friends.contains_key(&sender_endpoint);
         if !is_existing {
             let nickname = format!("Friend {}", &sender_endpoint.to_string()[..5]);
-            let id = ab.add_friend(nickname, sender_endpoint);
+            let _id = ab.add_friend(nickname, sender_endpoint);
             // Notify frontend
             if let Some(friend) = ab.friends.get(&sender_endpoint) {
                 let _ = self.event_tx.send(CoreEvent::FriendAdded { friend: friend.clone() });
@@ -119,7 +123,7 @@ impl BoopEngine {
             };
 
             while let Some(Ok(event)) = stream.next().await {
-                if let LiveEvent::InsertRemote { from, entry, .. } = event {
+                if let LiveEvent::InsertRemote { from: _, entry, .. } = event {
                     let key = entry.key().to_vec();
                     if let Ok(key_str) = String::from_utf8(key) {
                         log::debug!("InsertRemote: {}", key_str);
@@ -202,14 +206,14 @@ impl BoopEngine {
         &self,
         friend_id: uuid::Uuid,
         boop_id: uuid::Uuid,
-        entry: iroh_docs::Entry,
+        _entry: iroh_docs::Entry,
     ) {
         // Collect garbage
         if let Some(queue_arc) = self.queues.lock().await.get(&friend_id) {
             let queue = queue_arc.lock().await;
             
             // Delete the metadata
-            let boop_key = format!("boops/{:020}-{boop_id}", 0); // We'd need the created timestamp... or we can just list prefix
+            // let boop_key = format!("boops/{:020}-{boop_id}", 0); // We'd need the created timestamp... or we can just list prefix
             
             // Wait, we need the exact key to delete it. Let's just use queue.garbage_collect_tombstones()
             queue.garbage_collect_tombstones().await.ok();
@@ -322,5 +326,34 @@ impl BoopEngine {
         } else {
             Err(anyhow::anyhow!("Friend queue not initialized"))
         }
+    }
+
+    pub async fn play_boop(&self, friend_id: uuid::Uuid, boop_id: uuid::Uuid) -> Result<()> {
+        let audio_bytes = {
+            let queues = self.queues.lock().await;
+            if let Some(queue_mtx) = queues.get(&friend_id) {
+                let queue = queue_mtx.lock().await;
+                // Find the boop to get its hash
+                let pending = queue.get_pending_boops().await?;
+                let boop = pending.iter().find(|b| b.id == boop_id)
+                    .ok_or_else(|| anyhow::anyhow!("Boop not found in pending queue"))?;
+                
+                queue.get_audio_bytes(boop.blob_hash).await?
+            } else {
+                return Err(anyhow::anyhow!("Friend queue not initialized"));
+            }
+        };
+
+        let _ = self.event_tx.send(CoreEvent::PlaybackStarted { friend_id, boop_id });
+        
+        // Play the audio. This blocks until playback finishes.
+        self.player.play(audio_bytes).await?;
+
+        // Automatically mark as listened
+        self.mark_listened(friend_id, boop_id).await?;
+
+        let _ = self.event_tx.send(CoreEvent::PlaybackFinished { friend_id, boop_id });
+        
+        Ok(())
     }
 }

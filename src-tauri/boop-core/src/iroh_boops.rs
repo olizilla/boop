@@ -219,4 +219,9 @@ impl BoopQueue {
 		}
 		Ok(())
 	}
+
+	#[cfg(test)]
+	pub fn doc(&self) -> &Doc {
+		&self.doc
+	}
 }
