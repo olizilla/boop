@@ -31,9 +31,10 @@ impl BoopEngine {
     pub async fn new(
         iroh: IrohManager,
         address_book_path: PathBuf,
-        mut rx_handshake: tokio::sync::mpsc::UnboundedReceiver<(iroh::PublicKey, String)>,
+        rx_events: crate::iroh_manager::IrohEvents,
         player: Arc<dyn BoopPlayer>,
     ) -> Result<Self> {
+        let crate::iroh_manager::IrohEvents { mut handshake_rx, mut presence_rx } = rx_events;
         let address_book = if address_book_path.exists() {
             let json = tokio::fs::read_to_string(&address_book_path).await?;
             serde_json::from_str(&json).unwrap_or_else(|e| {
@@ -74,11 +75,23 @@ impl BoopEngine {
         // Spawn Handshake Listener
         let engine_for_handshake = engine.clone();
         tokio::spawn(async move {
-            while let Some((sender_endpoint, doc_ticket)) = rx_handshake.recv().await {
+            while let Some((sender_endpoint, doc_ticket)) = handshake_rx.recv().await {
                 log::info!(">>> Received Handshake from {}", sender_endpoint);
                 engine_for_handshake.handle_handshake(sender_endpoint, doc_ticket).await;
             }
         });
+
+        // Spawn Presence Listener
+        let engine_for_presence = engine.clone();
+        tokio::spawn(async move {
+            while let Some((sender_endpoint, is_active)) = presence_rx.recv().await {
+                log::info!(">>> Received Presence from {}: {}", sender_endpoint, is_active);
+                engine_for_presence.handle_presence(sender_endpoint, is_active).await;
+            }
+        });
+
+        // Trigger an immediate reconnect on startup
+        engine.dial_all_friends().await;
 
         Ok(engine)
     }
@@ -87,6 +100,8 @@ impl BoopEngine {
         let mut ab = self.address_book.lock().await;
         
         let is_existing = ab.friends.contains_key(&sender_endpoint);
+        let mut needs_spawn = false;
+
         if !is_existing {
             let nickname = format!("Friend {}", &sender_endpoint.to_string()[..5]);
             let _id = ab.add_friend(nickname, sender_endpoint);
@@ -94,18 +109,28 @@ impl BoopEngine {
             if let Some(friend) = ab.friends.get(&sender_endpoint) {
                 let _ = self.event_tx.send(CoreEvent::FriendAdded { friend: friend.clone() });
             }
+            needs_spawn = true;
+        } else {
+            let friend = ab.friends.get(&sender_endpoint).unwrap();
+            if friend.doc_ticket.as_ref() != Some(&doc_ticket) {
+                needs_spawn = true;
+            } else {
+                log::info!("Handshake doc ticket is unchanged. Ignoring to prevent duplicate listeners.");
+            }
         }
         
-        ab.set_friend_doc(sender_endpoint, doc_ticket.clone());
-        self.save_address_book(&ab).await.ok();
-        
-        let friend = ab.friends.get(&sender_endpoint).cloned().unwrap();
-        
-        if let Ok(queue) = BoopQueue::new(Some(doc_ticket), self.iroh.clone()).await {
-            log::info!("Successfully joined queue from handshake.");
-            let queue_arc = Arc::new(Mutex::new(queue));
-            self.queues.lock().await.insert(friend.id, queue_arc.clone());
-            self.spawn_queue_listener(friend.id, friend.endpoint_id, queue_arc).await;
+        if needs_spawn {
+            ab.set_friend_doc(sender_endpoint, doc_ticket.clone());
+            self.save_address_book(&ab).await.ok();
+            
+            let friend = ab.friends.get(&sender_endpoint).cloned().unwrap();
+            
+            if let Ok(queue) = BoopQueue::new(Some(doc_ticket), self.iroh.clone()).await {
+                log::info!("Successfully joined queue from handshake.");
+                let queue_arc = Arc::new(Mutex::new(queue));
+                self.queues.lock().await.insert(friend.id, queue_arc.clone());
+                self.spawn_queue_listener(friend.id, friend.endpoint_id, queue_arc).await;
+            }
         }
     }
 
@@ -129,19 +154,32 @@ impl BoopEngine {
             };
 
             while let Some(Ok(event)) = stream.next().await {
-                if let LiveEvent::InsertRemote { from: _, entry, .. } = event {
-                    let key = entry.key().to_vec();
-                    if let Ok(key_str) = String::from_utf8(key) {
-                        log::debug!("InsertRemote: {}", key_str);
-                        if key_str.starts_with("boops/") {
-                            engine.handle_remote_boop(friend_id, friend_endpoint, entry).await;
-                        } else if key_str.starts_with("listened/") {
-                            let boop_id_str = key_str.replace("listened/", "");
-                            if let Ok(boop_id) = boop_id_str.parse::<uuid::Uuid>() {
-                                engine.handle_remote_listened(friend_id, boop_id, entry).await;
+                match event {
+                    LiveEvent::InsertRemote { entry, .. } => {
+                        let key = entry.key().to_vec();
+                        if let Ok(key_str) = String::from_utf8(key) {
+                            log::debug!("InsertRemote: {}", key_str);
+                            if key_str.starts_with("boops/") {
+                                engine.handle_remote_boop(friend_id, friend_endpoint, entry).await;
+                            } else if key_str.starts_with("listened/") {
+                                let boop_id_str = key_str.replace("listened/", "");
+                                if let Ok(boop_id) = boop_id_str.parse::<uuid::Uuid>() {
+                                    engine.handle_remote_listened(friend_id, boop_id, entry).await;
+                                }
                             }
                         }
                     }
+                    LiveEvent::NeighborUp(pubkey) => {
+                        if pubkey == friend_endpoint {
+                            let _ = engine.event_tx.send(CoreEvent::PeerConnected { friend_id });
+                        }
+                    }
+                    LiveEvent::NeighborDown(pubkey) => {
+                        if pubkey == friend_endpoint {
+                            let _ = engine.event_tx.send(CoreEvent::PeerDisconnected { friend_id });
+                        }
+                    }
+                    _ => {}
                 }
             }
         });
@@ -232,6 +270,54 @@ impl BoopEngine {
         let json = serde_json::to_string_pretty(ab)?;
         tokio::fs::write(&self.address_book_path, json).await?;
         Ok(())
+    }
+
+    pub async fn handle_presence(&self, sender_endpoint: iroh::PublicKey, is_active: bool) {
+        let ab = self.address_book.lock().await;
+        if let Some(friend) = ab.friends.get(&sender_endpoint) {
+            let friend_id = friend.id;
+            if is_active {
+                let _ = self.event_tx.send(CoreEvent::PeerActive { friend_id });
+            } else {
+                let _ = self.event_tx.send(CoreEvent::PeerBackgrounded { friend_id });
+            }
+        }
+    }
+
+    pub async fn dial_all_friends(&self) {
+        let friends: Vec<Friend> = {
+            let ab = self.address_book.lock().await;
+            ab.friends.values().cloned().collect()
+        };
+        for friend in friends {
+            if let Some(ref ticket) = friend.doc_ticket {
+                let dt = ticket.clone();
+                let iroh = self.iroh.clone();
+                let ep = friend.endpoint_id;
+                tokio::spawn(async move {
+                    let _ = iroh.dial_friend(ep, dt).await;
+                });
+            }
+        }
+    }
+
+    pub async fn set_focus_state(&self, is_focused: bool) {
+        let friends: Vec<Friend> = {
+            let ab = self.address_book.lock().await;
+            ab.friends.values().cloned().collect()
+        };
+        
+        if is_focused {
+            self.dial_all_friends().await;
+        }
+
+        for friend in friends {
+            let iroh = self.iroh.clone();
+            let ep = friend.endpoint_id;
+            tokio::spawn(async move {
+                let _ = iroh.send_presence(ep, is_focused).await;
+            });
+        }
     }
 
     pub async fn emit_snapshot(&self) {
