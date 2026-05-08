@@ -36,6 +36,9 @@ mod integration_tests {
         let (iroh_a, rx_a) = IrohManager::new(iroh_dir_a, true).await.unwrap();
         let (iroh_b, rx_b) = IrohManager::new(iroh_dir_b, true).await.unwrap();
 
+        let ticket_a = iroh_a.endpoint_ticket().unwrap();
+        iroh_b.connect_to_endpoint_ticket(&ticket_a).await.unwrap();
+
         let player_a = Arc::new(MockPlayer);
         let player_b = Arc::new(MockPlayer);
         let _engine_a = BoopEngine::new(iroh_a.clone(), addr_book_a, rx_a, player_a).await.unwrap();
@@ -191,13 +194,16 @@ mod integration_tests {
     }
 
     #[tokio::test]
-    #[ignore = "Flaky in local MDNS test env"]
     async fn test_presence_and_neighbor_events() {
         let dir_a = tempdir().unwrap();
         let dir_b = tempdir().unwrap();
         
         let (iroh_a, rx_a) = IrohManager::new(dir_a.path().join("iroh"), true).await.unwrap();
         let (iroh_b, rx_b) = IrohManager::new(dir_b.path().join("iroh"), true).await.unwrap();
+
+        // Manually connect nodes
+        let ticket_b = iroh_b.endpoint_ticket().unwrap();
+        iroh_a.connect_to_endpoint_ticket(&ticket_b).await.unwrap();
         
         let player_a = Arc::new(MockPlayer);
         let player_b = Arc::new(MockPlayer);
@@ -216,10 +222,10 @@ mod integration_tests {
         // Add friend A to B so B knows A's ID
         let friend_id_a = engine_b.add_friend("A".to_string(), iroh_a.endpoint_id).await.unwrap();
 
-        // Let them handshake and resolve MDNS
+        // Let them handshake
         tokio::time::sleep(Duration::from_millis(500)).await;
 
-        // Try explicitly sending presence to see if it fails (with retries for MDNS discovery)
+        // Try explicitly sending presence to see if it fails (with retries for discovery)
         let mut presence_success = false;
         for _ in 0..10 {
             if iroh_a.send_presence(iroh_b.endpoint_id, true).await.is_ok() {

@@ -30,6 +30,10 @@ async fn test_handshake_and_boop_sync() {
 	let (iroh_a, _rx_a) = IrohManager::new(dir_a.path().to_path_buf(), true).await.unwrap();
 	let (iroh_b, mut rx_b) = IrohManager::new(dir_b.path().to_path_buf(), true).await.unwrap();
 
+	// Manually connect nodes using EndpointTicket
+	let ticket_b = iroh_b.endpoint_ticket().unwrap();
+	iroh_a.connect_to_endpoint_ticket(&ticket_b).await.unwrap();
+
 	// Alice creates a queue
 	let queue_a = BoopQueue::new(None, iroh_a.clone()).await.unwrap();
 	let ticket = queue_a.ticket();
@@ -59,6 +63,10 @@ async fn test_full_boop_lifecycle() {
 
 	let (iroh_a, _rx_a) = IrohManager::new(dir_a.path().to_path_buf(), true).await.unwrap();
 	let (iroh_b, mut rx_b) = IrohManager::new(dir_b.path().to_path_buf(), true).await.unwrap();
+
+	// Manually connect nodes using EndpointTicket
+	let ticket_b = iroh_b.endpoint_ticket().unwrap();
+	iroh_a.connect_to_endpoint_ticket(&ticket_b).await.unwrap();
 
 	// Alice creates a queue
 	let mut queue_a = BoopQueue::new(None, iroh_a.clone()).await.unwrap();

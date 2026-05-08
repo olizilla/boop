@@ -4,12 +4,12 @@ use iroh::{Endpoint, SecretKey, protocol::Router, protocol::ProtocolHandler, end
 use iroh_blobs::{ALPN as BLOBS_ALPN, BlobsProtocol, api::blobs::Blobs, store::fs::FsStore};
 use iroh_docs::{ALPN as DOCS_ALPN, protocol::Docs};
 use iroh_gossip::{ALPN as GOSSIP_ALPN, net::Gossip};
-use iroh_mdns_address_lookup::MdnsAddressLookup;
 use tokio::io::AsyncWriteExt;
 use iroh_docs::AuthorId;
 use tokio::sync::mpsc;
 use serde::{Serialize, Deserialize};
 use n0_future::StreamExt;
+use iroh_tickets::endpoint::EndpointTicket;
 
 pub const HANDSHAKE_ALPN: &[u8] = b"boop/handshk";
 pub const PRESENCE_ALPN: &[u8] = b"boop/prsnc";
@@ -94,11 +94,11 @@ impl IrohManager {
 		let endpoint = if local_only {
 			use iroh::RelayMode;
 			
-			let builder = Endpoint::builder(presets::Minimal)
-				.relay_mode(RelayMode::Disabled);
-				
-			let mdns = MdnsAddressLookup::builder().build(endpoint_id).unwrap();
-			builder.address_lookup(mdns).secret_key(key.clone()).bind().await?
+			Endpoint::builder(presets::Minimal)
+				.relay_mode(RelayMode::Disabled)
+				.secret_key(key.clone())
+				.bind()
+				.await?
 		} else {
 			Endpoint::builder(presets::N0).secret_key(key.clone()).bind().await?
 		};
@@ -161,6 +161,15 @@ impl IrohManager {
 	
 	pub fn endpoint(&self) -> &Endpoint {
 		&self.endpoint
+	}
+	
+	pub fn endpoint_ticket(&self) -> Result<EndpointTicket> {
+		Ok(EndpointTicket::new(self.endpoint.addr()))
+	}
+
+	pub async fn connect_to_endpoint_ticket(&self, ticket: &EndpointTicket) -> Result<()> {
+		self.endpoint.connect(ticket.endpoint_addr().clone(), PRESENCE_ALPN).await?;
+		Ok(())
 	}
 	
 	pub async fn dial_friend(&self, addr: impl Into<iroh::EndpointAddr>, doc_ticket: String) -> Result<()> {

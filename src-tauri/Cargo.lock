@@ -3,21 +3,6 @@
 version = 3
 
 [[package]]
-name = "acto"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "148541f13c28e3e840354ee4d6c99046c10be2c81068bbd23b9e3a38f95a917e"
-dependencies = [
- "parking_lot",
- "pin-project-lite",
- "rustc_version",
- "smol_str",
- "sync_wrapper",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -615,7 +600,7 @@ dependencies = [
  "iroh-blobs",
  "iroh-docs",
  "iroh-gossip",
- "iroh-mdns-address-lookup",
+ "iroh-tickets",
  "log",
  "n0-future",
  "rand 0.9.2",
@@ -3134,9 +3119,9 @@ dependencies = [
  "iroh-dns",
  "iroh-metrics",
  "iroh-relay",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "n0-future",
- "n0-watcher 1.0.0-rc.0",
+ "n0-watcher",
  "netwatch",
  "noq",
  "noq-proto",
@@ -3177,7 +3162,7 @@ dependencies = [
  "digest 0.11.3",
  "ed25519-dalek",
  "getrandom 0.4.2",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "rand 0.10.1",
  "serde",
  "sha2 0.11.0",
@@ -3210,7 +3195,7 @@ dependencies = [
  "iroh-tickets",
  "iroh-util",
  "irpc",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "n0-future",
  "nested_enum_utils",
  "noq",
@@ -3238,7 +3223,7 @@ dependencies = [
  "derive_more 2.1.1",
  "hickory-resolver",
  "iroh-base",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "n0-future",
  "ndk-context",
  "rand 0.10.1",
@@ -3272,7 +3257,7 @@ dependencies = [
  "iroh-metrics",
  "iroh-tickets",
  "irpc",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "n0-future",
  "noq",
  "num_enum",
@@ -3312,7 +3297,7 @@ dependencies = [
  "iroh-base",
  "iroh-metrics",
  "irpc",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "n0-future",
  "postcard",
  "rand 0.10.1",
@@ -3336,26 +3321,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "iroh-mdns-address-lookup"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21ebbd58234e3ad98d723fa8b03b14b721b023d5923dfb1739c26e97663ef0ba"
-dependencies = [
- "data-encoding",
- "derive_more 2.1.1",
- "futures-util",
- "iroh",
- "iroh-base",
- "n0-error 1.0.0-rc.0",
- "n0-future",
- "n0-watcher 0.6.1",
- "swarm-discovery",
- "tokio",
- "tokio-stream",
- "tracing",
-]
-
-[[package]]
 name = "iroh-metrics"
 version = "1.0.0-rc.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3366,7 +3331,7 @@ dependencies = [
  "hyper-util",
  "iroh-metrics-derive",
  "itoa",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "portable-atomic",
  "reqwest",
  "rustls",
@@ -3414,7 +3379,7 @@ dependencies = [
  "iroh-dns",
  "iroh-metrics",
  "lru",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "n0-future",
  "noq",
  "noq-proto",
@@ -3459,7 +3424,7 @@ dependencies = [
  "data-encoding",
  "derive_more 2.1.1",
  "iroh-base",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "postcard",
  "serde",
 ]
@@ -3472,7 +3437,7 @@ checksum = "e7705450a124b2b05f7caad505620ab5ac3bf4eb6b85018e6b9bca36329fd031"
 dependencies = [
  "derive_more 2.1.1",
  "iroh",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "n0-future",
  "tokio",
  "tracing",
@@ -3487,7 +3452,7 @@ dependencies = [
  "futures-buffered",
  "futures-util",
  "irpc-derive",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "n0-future",
  "noq",
  "postcard",
@@ -4018,34 +3983,13 @@ dependencies = [
 
 [[package]]
 name = "n0-error"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af4782b4baf92d686d161c15460c83d16ebcfd215918763903e9619842665cae"
-dependencies = [
- "n0-error-macros 0.1.3",
- "spez",
-]
-
-[[package]]
-name = "n0-error"
 version = "1.0.0-rc.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "223e946a84aa91644507a6b7865cfebbb9a231ace499041c747ab0fd30408212"
 dependencies = [
  "anyhow",
- "n0-error-macros 1.0.0-rc.0",
+ "n0-error-macros",
  "spez",
-]
-
-[[package]]
-name = "n0-error-macros"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03755949235714b2b307e5ae89dd8c1c2531fb127d9b8b7b4adf9c876cd3ed18"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -4082,23 +4026,12 @@ dependencies = [
 
 [[package]]
 name = "n0-watcher"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38795f7932e6e9d1c6e989270ef5b3ff24ebb910e2c9d4bed2d28d8bae3007dc"
-dependencies = [
- "derive_more 2.1.1",
- "n0-error 0.1.3",
- "n0-future",
-]
-
-[[package]]
-name = "n0-watcher"
 version = "1.0.0-rc.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "928d8039a66cce5efcfd35e88b32d3defc8eba630b3ac451522997f563956a52"
 dependencies = [
  "derive_more 2.1.1",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "n0-future",
 ]
 
@@ -4263,9 +4196,9 @@ dependencies = [
  "derive_more 2.1.1",
  "js-sys",
  "libc",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "n0-future",
- "n0-watcher 1.0.0-rc.0",
+ "n0-watcher",
  "netdev",
  "netlink-packet-core",
  "netlink-packet-route 0.30.0",
@@ -5167,7 +5100,7 @@ dependencies = [
  "igd-next",
  "iroh-metrics",
  "libc",
- "n0-error 1.0.0-rc.0",
+ "n0-error",
  "n0-future",
  "netwatch",
  "num_enum",
@@ -6575,12 +6508,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "smol_str"
-version = "0.1.24"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fad6c857cbab2627dcf01ec85a623ca4e7dcb5691cbaa3d7fb7653671f0d09c9"
-
-[[package]]
 name = "socket2"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6767,21 +6694,6 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
-
-[[package]]
-name = "swarm-discovery"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a5e3cb18dc0532c89b4fd9f5c9a44cb2db3c15520b6fa37d604b878ba431afb"
-dependencies = [
- "acto",
- "hickory-proto",
- "rand 0.10.1",
- "socket2",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
-]
 
 [[package]]
 name = "swift-rs"
