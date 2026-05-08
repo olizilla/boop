@@ -6,10 +6,10 @@ use iroh_docs::{ALPN as DOCS_ALPN, protocol::Docs};
 use iroh_gossip::{ALPN as GOSSIP_ALPN, net::Gossip};
 use tokio::io::AsyncWriteExt;
 use iroh_docs::AuthorId;
-use std::future::Future; 
 use tokio::sync::mpsc;
 use serde::{Serialize, Deserialize};
 use n0_future::StreamExt;
+use iroh_tickets::endpoint::EndpointTicket;
 
 pub const HANDSHAKE_ALPN: &[u8] = b"boop/handshk";
 pub const PRESENCE_ALPN: &[u8] = b"boop/prsnc";
@@ -31,22 +31,20 @@ pub struct BoopHandshakeHandler {
 }
 
 impl ProtocolHandler for BoopHandshakeHandler {
-	fn accept(&self, connection: Connection) -> impl Future<Output = Result<(), AcceptError>> + Send {
+	async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
 		let tx = self.tx.clone();
-		async move {
-			let Ok((mut send, mut recv)) = connection.accept_bi().await else { return Ok(()); };
-			let Ok(buf) = recv.read_to_end(2048).await else { return Ok(()); };
-			let Ok(payload) = serde_json::from_slice::<HandshakePayload>(&buf) else { return Ok(()); };
-			
-			// We got the payload, emit it to the app!
-			let _ = tx.send((payload.sender_endpoint_id, payload.doc_ticket));
-			
-			// Acknowledge receipt
-			let _ = send.write_all(&[1]).await;
-			let _ = send.finish();
-			
-			Ok(())
-		}
+		let Ok((mut send, mut recv)) = connection.accept_bi().await else { return Ok(()); };
+		let Ok(buf) = recv.read_to_end(2048).await else { return Ok(()); };
+		let Ok(payload) = serde_json::from_slice::<HandshakePayload>(&buf) else { return Ok(()); };
+		
+		// We got the payload, emit it to the app!
+		let _ = tx.send((payload.sender_endpoint_id, payload.doc_ticket));
+		
+		// Acknowledge receipt
+		let _ = send.write_all(&[1]).await;
+		let _ = send.finish();
+		
+		Ok(())
 	}
 }
 
@@ -56,24 +54,22 @@ pub struct BoopPresenceHandler {
 }
 
 impl ProtocolHandler for BoopPresenceHandler {
-	fn accept(&self, connection: Connection) -> impl Future<Output = Result<(), AcceptError>> + Send {
+	async fn accept(&self, connection: Connection) -> Result<(), AcceptError> {
 		let tx = self.tx.clone();
-		async move {
-			let Ok((mut send, mut recv)) = connection.accept_bi().await else { return Ok(()); };
-			
-			let mut buf = [0u8; 1];
-			let Ok(_) = recv.read_exact(&mut buf).await else { return Ok(()); };
-			
-			let sender_endpoint_id = connection.remote_id();
-			let is_active = buf[0] == 1;
-			let _ = tx.send((sender_endpoint_id, is_active));
-			
-			// Send ACK
-			let _ = send.write_all(&[1]).await;
-			let _ = send.finish();
-			
-			Ok(())
-		}
+		let Ok((mut send, mut recv)) = connection.accept_bi().await else { return Ok(()); };
+		
+		let mut buf = [0u8; 1];
+		let Ok(_) = recv.read_exact(&mut buf).await else { return Ok(()); };
+		
+		let sender_endpoint_id = connection.remote_id();
+		let is_active = buf[0] == 1;
+		let _ = tx.send((sender_endpoint_id, is_active));
+		
+		// Send ACK
+		let _ = send.write_all(&[1]).await;
+		let _ = send.finish();
+		
+		Ok(())
 	}
 }
 
@@ -96,13 +92,13 @@ impl IrohManager {
 		// 1. Create Endpoint
 		let endpoint_id = key.public();
 		let endpoint = if local_only {
-			use iroh::{address_lookup::MdnsAddressLookup, RelayMode};
+			use iroh::RelayMode;
 			
-			let builder = Endpoint::empty_builder()
-				.relay_mode(RelayMode::Disabled);
-				
-			let mdns = MdnsAddressLookup::builder().build(endpoint_id).unwrap();
-			builder.address_lookup(mdns).secret_key(key.clone()).bind().await?
+			Endpoint::builder(presets::Minimal)
+				.relay_mode(RelayMode::Disabled)
+				.secret_key(key.clone())
+				.bind()
+				.await?
 		} else {
 			Endpoint::builder(presets::N0).secret_key(key.clone()).bind().await?
 		};
@@ -167,6 +163,15 @@ impl IrohManager {
 		&self.endpoint
 	}
 	
+	pub fn endpoint_ticket(&self) -> Result<EndpointTicket> {
+		Ok(EndpointTicket::new(self.endpoint.addr()))
+	}
+
+	pub async fn connect_to_endpoint_ticket(&self, ticket: &EndpointTicket) -> Result<()> {
+		self.endpoint.connect(ticket.endpoint_addr().clone(), PRESENCE_ALPN).await?;
+		Ok(())
+	}
+	
 	pub async fn dial_friend(&self, addr: impl Into<iroh::EndpointAddr>, doc_ticket: String) -> Result<()> {
 		let addr = addr.into();
 		let connection = self.endpoint.connect(addr, HANDSHAKE_ALPN).await?;
@@ -196,7 +201,7 @@ impl IrohManager {
 			let secret_key = SecretKey::try_from(&key_bytes[0..32])?;
 			Ok(secret_key)
 		} else {
-			let secret_key = SecretKey::generate(&mut rand::rng());
+			let secret_key = SecretKey::generate();
 			
 			let key_path_parent = key_path.parent().expect("must have parent");
 			tokio::fs::create_dir_all(&key_path_parent).await?;

@@ -5,10 +5,11 @@ edition = "2024"
 license = "GPL-3.0"
 
 [dependencies]
-iroh = { version = "0.97", features = ["address-lookup-mdns"] }
-iroh-docs = "0.97"
-iroh-blobs = "0.99"
-iroh-gossip = "0.97"
+iroh = { version = "1.0.0-rc.0", features = ["test-utils"] }
+iroh-docs = "0.99"
+iroh-blobs = "0.101"
+iroh-gossip = "0.99"
+iroh-tickets = "1.0.0-rc.0"
 tokio = { version = "1.0", features = ["full", "rt-multi-thread"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
