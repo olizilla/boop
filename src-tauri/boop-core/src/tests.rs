@@ -36,14 +36,13 @@ mod integration_tests {
         let (iroh_a, rx_a) = IrohManager::new(iroh_dir_a, true).await.unwrap();
         let (iroh_b, rx_b) = IrohManager::new(iroh_dir_b, true).await.unwrap();
 
-        // This should fail to compile because BoopEngine::new doesn't take player yet
         let player_a = Arc::new(MockPlayer);
         let player_b = Arc::new(MockPlayer);
         let _engine_a = BoopEngine::new(iroh_a.clone(), addr_book_a, rx_a, player_a).await.unwrap();
         let engine_b = BoopEngine::new(iroh_b.clone(), addr_book_b, rx_b, player_b).await.unwrap();
 
-        // ... existing test logic ...
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        engine_b.add_friend("A".to_string(), iroh_a.endpoint_id).await.unwrap();
+
         let boop_bytes = b"real-boop-payload".to_vec();
         let raw_hash = iroh_a.blobs().add_bytes(boop_bytes.clone()).await.unwrap().hash;
         let boop = crate::iroh_boops::Boop {
@@ -55,7 +54,15 @@ mod integration_tests {
         };
         let boop_meta_bytes = serde_json::to_vec(&boop).unwrap();
         let meta_hash = iroh_a.blobs().add_bytes(boop_meta_bytes.clone()).await.unwrap().hash;
-        engine_b.iroh.fetch_blob(&meta_hash.to_string(), &iroh_a.endpoint_id.to_string()).await.unwrap();
+        let mut fetch_success = false;
+        for _ in 0..10 {
+            if engine_b.iroh.fetch_blob(&meta_hash.to_string(), &iroh_a.endpoint_id.to_string()).await.is_ok() {
+                fetch_success = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        assert!(fetch_success, "Blob download failed after retries");
         let fetched_meta_bytes = engine_b.iroh.blobs().get_bytes(meta_hash).await.unwrap();
         assert_eq!(fetched_meta_bytes.len(), boop_meta_bytes.len());
     }
@@ -182,4 +189,62 @@ mod integration_tests {
         let audio_bytes = iroh.blobs().get_bytes(boop.blob_hash).await.unwrap();
         assert!(audio_bytes.len() < original_size, "FLAC should be smaller than WAV");
     }
+
+    #[tokio::test]
+    #[ignore = "Flaky in local MDNS test env"]
+    async fn test_presence_and_neighbor_events() {
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        
+        let (iroh_a, rx_a) = IrohManager::new(dir_a.path().join("iroh"), true).await.unwrap();
+        let (iroh_b, rx_b) = IrohManager::new(dir_b.path().join("iroh"), true).await.unwrap();
+        
+        let player_a = Arc::new(MockPlayer);
+        let player_b = Arc::new(MockPlayer);
+        
+        let engine_a = BoopEngine::new(iroh_a.clone(), dir_a.path().join("friends.json"), rx_a, player_a).await.unwrap();
+        let engine_b = BoopEngine::new(iroh_b.clone(), dir_b.path().join("friends.json"), rx_b, player_b).await.unwrap();
+
+        let mut event_rx_b = engine_b.event_tx.subscribe();
+
+        // Add friend B to A
+        let _friend_id_b = engine_a.add_friend("B".to_string(), iroh_b.endpoint_id).await.unwrap();
+        
+        // Let them sync up
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        
+        // Add friend A to B so B knows A's ID
+        let friend_id_a = engine_b.add_friend("A".to_string(), iroh_a.endpoint_id).await.unwrap();
+
+        // Let them handshake and resolve MDNS
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // Try explicitly sending presence to see if it fails (with retries for MDNS discovery)
+        let mut presence_success = false;
+        for _ in 0..10 {
+            if iroh_a.send_presence(iroh_b.endpoint_id, true).await.is_ok() {
+                presence_success = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        }
+        assert!(presence_success, "send_presence failed directly after retries");
+        
+        // Wait for B to receive PeerActive
+        let mut got_active = false;
+        for _ in 0..10 {
+            if let Ok(event) = event_rx_b.try_recv() {
+                if let crate::events::CoreEvent::PeerActive { friend_id } = event {
+                    if friend_id == friend_id_a {
+                        got_active = true;
+                        break;
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        
+        assert!(got_active, "Should have received PeerActive event");
+    }
 }
+

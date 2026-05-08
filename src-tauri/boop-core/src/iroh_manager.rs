@@ -12,6 +12,12 @@ use serde::{Serialize, Deserialize};
 use n0_future::StreamExt;
 
 pub const HANDSHAKE_ALPN: &[u8] = b"boop/handshk";
+pub const PRESENCE_ALPN: &[u8] = b"boop/prsnc";
+
+pub struct IrohEvents {
+	pub handshake_rx: mpsc::UnboundedReceiver<(iroh::PublicKey, String)>,
+	pub presence_rx: mpsc::UnboundedReceiver<(iroh::PublicKey, bool)>,
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HandshakePayload {
@@ -45,6 +51,33 @@ impl ProtocolHandler for BoopHandshakeHandler {
 }
 
 #[derive(Clone, Debug)]
+pub struct BoopPresenceHandler {
+	pub tx: mpsc::UnboundedSender<(iroh::PublicKey, bool)>,
+}
+
+impl ProtocolHandler for BoopPresenceHandler {
+	fn accept(&self, connection: Connection) -> impl Future<Output = Result<(), AcceptError>> + Send {
+		let tx = self.tx.clone();
+		async move {
+			let Ok((mut send, mut recv)) = connection.accept_bi().await else { return Ok(()); };
+			
+			let mut buf = [0u8; 1];
+			let Ok(_) = recv.read_exact(&mut buf).await else { return Ok(()); };
+			
+			let sender_endpoint_id = connection.remote_id();
+			let is_active = buf[0] == 1;
+			let _ = tx.send((sender_endpoint_id, is_active));
+			
+			// Send ACK
+			let _ = send.write_all(&[1]).await;
+			let _ = send.finish();
+			
+			Ok(())
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
 pub struct IrohManager {
 	#[allow(dead_code)]
 	router: Router,
@@ -56,7 +89,7 @@ pub struct IrohManager {
 }
 
 impl IrohManager {
-	pub async fn new(path: PathBuf, local_only: bool) -> Result<(Self, mpsc::UnboundedReceiver<(iroh::PublicKey, String)>)> {
+	pub async fn new(path: PathBuf, local_only: bool) -> Result<(Self, IrohEvents)> {
 		tokio::fs::create_dir_all(&path).await?;
 		let key = Self::load_secret_key(path.clone().join("keypair")).await?;
 
@@ -83,8 +116,11 @@ impl IrohManager {
 			.spawn(endpoint.clone(), (*blobs).clone(), gossip.clone())
 			.await?;
 
-		let (tx, rx) = mpsc::unbounded_channel();
+		let (tx, handshake_rx) = mpsc::unbounded_channel();
 		let handshake_handler = BoopHandshakeHandler { tx };
+
+		let (presence_tx, presence_rx) = mpsc::unbounded_channel();
+		let presence_handler = BoopPresenceHandler { tx: presence_tx };
 
 		let builder = Router::builder(endpoint.clone());
 		let router = builder
@@ -92,6 +128,7 @@ impl IrohManager {
 			.accept(DOCS_ALPN, docs.clone())
 			.accept(GOSSIP_ALPN, gossip)
 			.accept(HANDSHAKE_ALPN, std::sync::Arc::new(handshake_handler))
+			.accept(PRESENCE_ALPN, std::sync::Arc::new(presence_handler))
 			.spawn();
 
 		let authors: Vec<Result<AuthorId>> = docs.author_list().await?.collect().await;
@@ -111,7 +148,7 @@ impl IrohManager {
 			endpoint_id,
 		};
 
-		Ok((manager, rx))
+		Ok((manager, IrohEvents { handshake_rx, presence_rx }))
 	}
 
 	pub fn blobs(&self) -> &Blobs {
@@ -188,6 +225,22 @@ impl IrohManager {
 		downloader.download(hash, Some(endpoint_id)).await.context("Blob download failed")?;
 		
 		log::info!("Explicit Downloader completed blob fetch!");
+		
+		Ok(())
+	}
+
+	pub async fn send_presence(&self, addr: impl Into<iroh::EndpointAddr>, is_active: bool) -> Result<()> {
+		let addr = addr.into();
+		let connection = self.endpoint.connect(addr, PRESENCE_ALPN).await?;
+		let (mut send, mut recv) = connection.open_bi().await?;
+		
+		let val = if is_active { 1u8 } else { 0u8 };
+		send.write_all(&[val]).await?;
+		send.finish()?;
+		
+		// Wait for ACK
+		let mut ack = [0u8; 1];
+		let _ = recv.read_exact(&mut ack).await;
 		
 		Ok(())
 	}

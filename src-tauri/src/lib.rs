@@ -94,6 +94,13 @@ async fn mark_listened(state: State<'_, Arc<AppState>>, friend_id: String, boop_
 }
 
 #[tauri::command]
+async fn report_focus_state(state: State<'_, Arc<AppState>>, is_focused: bool) -> Result<(), String> {
+    log::info!("Reporting focus state: {}", is_focused);
+    state.engine.set_focus_state(is_focused).await;
+    Ok(())
+}
+
+#[tauri::command]
 async fn frontend_ready(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     log::info!("Frontend Ready! Emitting snapshot.");
     state.engine.emit_snapshot().await;
@@ -202,7 +209,8 @@ pub fn run() {
             play_boop,
             get_audio_bytes,
             mark_listened,
-            frontend_ready
+            frontend_ready,
+            report_focus_state
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

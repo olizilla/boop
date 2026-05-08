@@ -15,6 +15,7 @@ export default function App() {
 	const [mode, setMode] = createSignal(MODE_FRIEND);
 	const [status, setStatus] = createSignal('IDLE'); // IDLE, RECORDING, PLAYING, COOLDOWN
 	const [pendingBoops, setPendingBoops] = createStore({}); // friend_id -> Boop[]
+	const [presence, setPresence] = createStore({}); // friend_id -> { connected, active }
 	const [cooldown, setCooldown] = createSignal(0);
 	const [isFocused, setIsFocused] = createSignal(true);
 
@@ -27,6 +28,7 @@ export default function App() {
 	let isBoopPressed = false;
 	let cooldownInterval = null;
 	let audioContext = null;
+	let focusTimeout = null;
 
 	const warmUpMic = async () => {
 		if (audioStream) return audioStream;
@@ -54,10 +56,21 @@ export default function App() {
 	const currentFriend = () => friends()[currentIndex()];
 
 	onMount(async () => {
-		const handleFocus = () => setIsFocused(true);
-		const handleBlur = () => setIsFocused(false);
+		const updateFocusState = (focused) => {
+			setIsFocused(focused);
+			clearTimeout(focusTimeout);
+			focusTimeout = setTimeout(() => {
+				invoke('report_focus_state', { isFocused: focused }).catch(console.error);
+			}, 2000);
+		};
+
+		const handleFocus = () => updateFocusState(true);
+		const handleBlur = () => updateFocusState(false);
 		window.addEventListener('focus', handleFocus);
 		window.addEventListener('blur', handleBlur);
+		
+		// Initial trigger to kickstart dial_all_friends on boot
+		updateFocusState(true);
 
 		// Pre-warm the mic so first record is instant
 		warmUpMic().catch(() => {});
@@ -114,6 +127,32 @@ export default function App() {
 						clearInterval(cooldownInterval);
 						setStatus('IDLE');
 					}
+					break;
+				case 'peerConnected':
+					setPresence(produce(draft => {
+						if (!draft[payload.friend_id]) draft[payload.friend_id] = { connected: false, active: false };
+						draft[payload.friend_id].connected = true;
+					}));
+					break;
+				case 'peerDisconnected':
+					setPresence(produce(draft => {
+						if (!draft[payload.friend_id]) draft[payload.friend_id] = { connected: false, active: false };
+						draft[payload.friend_id].connected = false;
+						draft[payload.friend_id].active = false;
+					}));
+					break;
+				case 'peerActive':
+					setPresence(produce(draft => {
+						if (!draft[payload.friend_id]) draft[payload.friend_id] = { connected: false, active: false };
+						draft[payload.friend_id].connected = true;
+						draft[payload.friend_id].active = true;
+					}));
+					break;
+				case 'peerBackgrounded':
+					setPresence(produce(draft => {
+						if (!draft[payload.friend_id]) draft[payload.friend_id] = { connected: false, active: false };
+						draft[payload.friend_id].active = false;
+					}));
 					break;
 				default:
 					break;
@@ -325,6 +364,15 @@ export default function App() {
 		}
 	};
 
+	const friendPresence = () => currentFriend() ? (presence[currentFriend().id] || { connected: false, active: false }) : { connected: false, active: false };
+
+	const presenceClass = () => {
+		const p = friendPresence();
+		if (p.active) return 'status-active';
+		if (p.connected) return 'status-connected';
+		return 'status-offline';
+	};
+
 	return (
 		<div id="arcade-cabinet" classList={{ 'faded': !isFocused() }}>
 			<div id="screen" classList={{
@@ -335,7 +383,7 @@ export default function App() {
 			}}>
 				<div id="screen-glare"></div>
 				<div id="header">
-					<div id="status-indicator" class="online"></div>
+					<div id="status-indicator" class={presenceClass()}></div>
 					<h1>BOOP</h1>
 				</div>
 

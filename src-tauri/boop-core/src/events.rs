@@ -29,6 +29,15 @@ pub enum CoreEvent {
     PeerConnected {
         friend_id: uuid::Uuid,
     },
+    PeerDisconnected {
+        friend_id: uuid::Uuid,
+    },
+    PeerActive {
+        friend_id: uuid::Uuid,
+    },
+    PeerBackgrounded {
+        friend_id: uuid::Uuid,
+    },
     PlaybackStarted {
         friend_id: uuid::Uuid,
         boop_id: uuid::Uuid,

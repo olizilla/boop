@@ -39,7 +39,7 @@ async fn test_handshake_and_boop_sync() {
 
 	// Bob receives it
 	let result = tokio::time::timeout(Duration::from_secs(10), async {
-		if let Some((sender_id, doc_ticket)) = rx_b.recv().await {
+		if let Some((sender_id, doc_ticket)) = rx_b.handshake_rx.recv().await {
 			assert_eq!(sender_id, iroh_a.endpoint_id);
 			assert_eq!(doc_ticket, ticket);
 			true
@@ -68,7 +68,7 @@ async fn test_full_boop_lifecycle() {
 	robust_dial(&iroh_a, &iroh_b, ticket.clone()).await.expect("Failed to dial Bob after retries");
 
 	// Bob receives it and joins the queue
-	let (_, ticket_b) = tokio::time::timeout(Duration::from_secs(10), rx_b.recv())
+	let (_, ticket_b) = tokio::time::timeout(Duration::from_secs(10), rx_b.handshake_rx.recv())
 		.await.unwrap().expect("Bob should receive a handshake");
 		
 	// Bob might need a moment for the doc import to succeed if networking is busy
