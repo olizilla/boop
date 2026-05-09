@@ -8,22 +8,25 @@ We once had copper wires between every home, and if we were bored at home, we'd 
 > Warning: this is for fun. it is early days. it may work. no promises.
 
 ## Cosy stack
+
 Friends that made this possible:
 - **[Iroh](https://iroh.computer/)**: Fancy peer-to-peer networkinging magic.
 - **[Tauri](https://tauri.app/)**: The app wrap that lets us use the web platform for our UI.
 - **[Rodio](https://github.com/RustAudio/rodio)**: Native Rust audio playback for maximum reliability.
 
 ## How it Works:
-1. You record a voice message in the UI. It's encoded as a high-quality **WAV** in the browser.
-2. The WAV bytes are sent to the Rust backend, where they are transcoded to **FLAC** for efficient storage and transfer.
-3. The application creates a JSON record for the message with the hash of the FLAC blob.
-4. This record is synced with your friend's device using `iroh-docs`, a CRDT-based document synchronization system.
-5. Your friend's booper detects the new record and fetches the audio from you using `iroh-blobs`.
-6. Once the message is listened to (using native system audio), a "listened" receipt is sent back, and both boopers delete the audio to keep things neat.
 
-More detail in the [Boop Blob Sync doc](docs/boop_blob_sync_design.md)
+1. you record a voice note in the UI, a boop, encoded as a WAV.
+2. the boop is passed to the Rust backend and transcoded to FLAC to take up less space.
+3. a hash of the boop is shared with your friend via `iroh-docs`.
+4. your friend fetches the audio from you using the hash and `iroh-blobs`.
+5. they send a "listened" receipt, and both boopers delete the audio to keep things neat.
+6. if they chillin too, they might boop you back.
+
+More detail in the [Boop Sync doc](docs/boop_blob_sync_design.md)
 
 ## Development
+
 To get started with Boop, ensure you have Node.js and Rust installed, then run the setup script to install system dependencies and project packages:
 
 ```bash
