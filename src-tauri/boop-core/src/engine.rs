@@ -12,6 +12,7 @@ use iroh_docs::engine::LiveEvent;
 use n0_future::StreamExt;
 use std::io::Cursor;
 use hound::WavReader;
+use hex;
 use flacenc::config;
 use flacenc::source::MemSource;
 use flacenc::error::Verify;
@@ -31,21 +32,12 @@ impl BoopEngine {
     pub async fn new(
         iroh: IrohManager,
         address_book_path: PathBuf,
+        address_book: Arc<tokio::sync::Mutex<AddressBook>>,
         rx_events: crate::iroh_manager::IrohEvents,
         player: Arc<dyn BoopPlayer>,
     ) -> Result<Self> {
-        let crate::iroh_manager::IrohEvents { mut handshake_rx, mut presence_rx } = rx_events;
-        let address_book = if address_book_path.exists() {
-            let json = tokio::fs::read_to_string(&address_book_path).await?;
-            serde_json::from_str(&json).unwrap_or_else(|e| {
-                log::warn!("Failed to parse address book: {}", e);
-                AddressBook::new()
-            })
-        } else {
-            AddressBook::new()
-        };
+        let crate::iroh_manager::IrohEvents { mut handshake_rx, mut presence_rx, mut welcome_rx } = rx_events;
 
-        let address_book = Arc::new(Mutex::new(address_book));
         let queues = Arc::new(Mutex::new(HashMap::new()));
         let (event_tx, _) = broadcast::channel(100);
 
@@ -87,6 +79,15 @@ impl BoopEngine {
             while let Some((sender_endpoint, is_active)) = presence_rx.recv().await {
                 log::info!(">>> Received Presence from {}: {}", sender_endpoint, is_active);
                 engine_for_presence.handle_presence(sender_endpoint, is_active).await;
+            }
+        });
+
+        // Spawn Welcome Listener
+        let engine_for_welcome = engine.clone();
+        tokio::spawn(async move {
+            while let Some(friend_id) = welcome_rx.recv().await {
+                log::info!(">>> Received Welcome for new friend ID: {}", friend_id);
+                engine_for_welcome.handle_welcome(friend_id).await;
             }
         });
 
@@ -134,6 +135,34 @@ impl BoopEngine {
         }
     }
 
+    pub async fn handle_welcome(&self, friend_id: uuid::Uuid) {
+        let mut ab = self.address_book.lock().await;
+        if let Some(friend) = ab.friends.values().find(|f| f.id == friend_id).cloned() {
+            self.save_address_book(&ab).await.ok();
+            let _ = self.event_tx.send(CoreEvent::FriendAdded { friend: friend.clone() });
+            
+            // Queue up handshake with this new friend
+            if let Ok(queue) = BoopQueue::new(None, self.iroh.clone()).await {
+                ab.set_friend_doc(friend.endpoint_id, queue.ticket());
+                self.save_address_book(&ab).await.ok();
+                
+                let queue_arc = Arc::new(Mutex::new(queue));
+                self.queues.lock().await.insert(friend.id, queue_arc.clone());
+                self.spawn_queue_listener(friend.id, friend.endpoint_id, queue_arc).await;
+
+                // Fire off handshake in background
+                let iroh_for_handshake = self.iroh.clone();
+                let doc_ticket = ab.friends.get(&friend.endpoint_id).unwrap().doc_ticket.clone().unwrap();
+                let endpoint_id = friend.endpoint_id;
+                tokio::spawn(async move {
+                    if let Err(e) = iroh_for_handshake.dial_friend(endpoint_id, doc_ticket).await {
+                        log::error!("Failed to handshake with new friend from welcome: {}", e);
+                    }
+                });
+            }
+        }
+    }
+
     pub async fn spawn_queue_listener(
         &self,
         friend_id: uuid::Uuid,
@@ -160,11 +189,17 @@ impl BoopEngine {
                         if let Ok(key_str) = String::from_utf8(key) {
                             log::debug!("InsertRemote: {}", key_str);
                             if key_str.starts_with("boops/") {
-                                engine.handle_remote_boop(friend_id, friend_endpoint, entry).await;
+                                let engine = engine.clone();
+                                tokio::spawn(async move {
+                                    engine.handle_remote_boop(friend_id, friend_endpoint, entry).await;
+                                });
                             } else if key_str.starts_with("listened/") {
                                 let boop_id_str = key_str.replace("listened/", "");
                                 if let Ok(boop_id) = boop_id_str.parse::<uuid::Uuid>() {
-                                    engine.handle_remote_listened(friend_id, boop_id, entry).await;
+                                    let engine = engine.clone();
+                                    tokio::spawn(async move {
+                                        engine.handle_remote_listened(friend_id, boop_id, entry).await;
+                                    });
                                 }
                             }
                         }
@@ -194,14 +229,15 @@ impl BoopEngine {
         let hash = entry.content_hash();
         let mut fetched_bytes = None;
         
-        for attempt in 0..5 {
-            if let Ok(bytes) = self.iroh.blobs().get_bytes(hash).await {
-                fetched_bytes = Some(bytes);
-                break;
-            }
+        if let Ok(bytes) = self.iroh.blobs().get_bytes(hash).await {
+            fetched_bytes = Some(bytes);
+        } else {
             log::warn!("Metadata blob {} missing, explicitly fetching...", hash);
-            let _ = self.iroh.fetch_blob(&hash.to_string(), &friend_endpoint.to_string()).await;
-            tokio::time::sleep(tokio::time::Duration::from_millis(500 * (attempt + 1))).await;
+            if self.iroh.fetch_blob(&hash.to_string(), &friend_endpoint.to_string()).await.is_ok() {
+                if let Ok(bytes) = self.iroh.blobs().get_bytes(hash).await {
+                    fetched_bytes = Some(bytes);
+                }
+            }
         }
 
         if let Some(b) = fetched_bytes {
@@ -333,6 +369,57 @@ impl BoopEngine {
                 }
             });
         }
+    }
+
+    pub async fn generate_invite(&self, pet_name: String) -> Result<crate::invite_ticket::InviteTicket> {
+        let mut ab = self.address_book.lock().await;
+        
+        // Generate random 32 byte token
+        use rand::RngCore;
+        let mut token = [0u8; 32];
+        rand::rng().fill_bytes(&mut token);
+        let token_hex = hex::encode(token);
+        
+        let invite = crate::address_book::Invite {
+            token,
+            pet_name,
+            created_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+        };
+        
+        ab.pending_invites.insert(token_hex, invite);
+        self.save_address_book(&ab).await.ok();
+        
+        let endpoint_ticket = self.iroh.endpoint_ticket()?;
+        let invite_ticket = crate::invite_ticket::InviteTicket {
+            endpoint: endpoint_ticket,
+            token,
+        };
+        
+        Ok(invite_ticket)
+    }
+
+pub async fn accept_invite(&self, ticket: crate::invite_ticket::InviteTicket, nickname: String) -> Result<uuid::Uuid> {
+        let friend_id = {
+            let mut ab = self.address_book.lock().await;
+            ab.add_friend(nickname, ticket.endpoint.endpoint_addr().id)
+        };
+        
+        {
+            let ab = self.address_book.lock().await;
+            self.save_address_book(&ab).await.ok();
+            if let Some(friend) = ab.friends.values().find(|f| f.id == friend_id).cloned() {
+                let _ = self.event_tx.send(CoreEvent::FriendAdded { friend: friend.clone() });
+            }
+        }
+        
+        // Dial the welcome protocol
+        self.iroh.dial_welcome(ticket.endpoint.endpoint_addr().clone(), ticket.token).await?;
+        
+        // The server will receive the welcome, add us as a friend, create a doc,
+        // and dial us back with a handshake. Our BoopHandshakeHandler will
+        // receive that and join the doc.
+        
+        Ok(friend_id)
     }
 
     pub async fn emit_snapshot(&self) {

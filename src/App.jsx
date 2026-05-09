@@ -2,12 +2,12 @@ import { createSignal, onMount, onCleanup, Show, Match, Switch } from 'solid-js'
 import { encodeWAV } from './audio';
 import { createStore, produce } from 'solid-js/store';
 import { invoke, listen, showWindow } from './tauri-bridge';
-import AddFriendView from './components/AddFriendView';
-import MyTicketView from './components/MyTicketView';
+import InviteFriendView from './components/InviteFriendView';
+import JoinFriendView from './components/JoinFriendView';
 
 const MODE_FRIEND = 'friend';
-const MODE_ADD_FRIEND = 'add_friend';
-const MODE_MY_TICKET = 'my_ticket';
+const MODE_INVITE = 'invite';
+const MODE_JOIN = 'join';
 
 export default function App() {
 	const [friends, setFriends] = createSignal([]);
@@ -90,7 +90,7 @@ export default function App() {
 					setFriends(payload.friends);
 					Object.entries(payload.pendingBoops).forEach(([k, v]) => setPendingBoops(k, v));
 					if (payload.friends.length === 0) {
-						setMode(MODE_ADD_FRIEND);
+						setMode(MODE_INVITE);
 					} else {
 						setMode(MODE_FRIEND);
 						setCurrentIndex(0);
@@ -172,39 +172,41 @@ export default function App() {
 
 	const handleLeft = () => {
 		if (status() !== 'IDLE') return;
-		if (mode() === MODE_MY_TICKET) {
-			setMode(MODE_ADD_FRIEND);
-		} else if (mode() === MODE_ADD_FRIEND) {
+		if (mode() === MODE_JOIN) {
+			setMode(MODE_INVITE);
+		} else if (mode() === MODE_INVITE) {
 			if (friends().length > 0) {
 				setMode(MODE_FRIEND);
 				setCurrentIndex(friends().length - 1);
+			} else {
+				setMode(MODE_JOIN);
 			}
 		} else {
 			if (currentIndex() > 0) {
 				setCurrentIndex(currentIndex() - 1);
 			} else {
-				setMode(MODE_MY_TICKET);
+				setMode(MODE_JOIN);
 			}
 		}
 	};
 
 	const handleRight = () => {
 		if (status() !== 'IDLE') return;
-		if (mode() === MODE_MY_TICKET) {
+		if (mode() === MODE_JOIN) {
 			if (friends().length > 0) {
 				setMode(MODE_FRIEND);
 				setCurrentIndex(0);
 			} else {
-				setMode(MODE_ADD_FRIEND);
+				setMode(MODE_INVITE);
 			}
 		} else if (mode() === MODE_FRIEND) {
 			if (currentIndex() < friends().length - 1) {
 				setCurrentIndex(currentIndex() + 1);
 			} else {
-				setMode(MODE_ADD_FRIEND);
+				setMode(MODE_INVITE);
 			}
-		} else if (mode() === MODE_ADD_FRIEND) {
-			setMode(MODE_MY_TICKET);
+		} else if (mode() === MODE_INVITE) {
+			setMode(MODE_JOIN);
 		}
 	};
 
@@ -389,11 +391,11 @@ export default function App() {
 
 				<div id="content-area">
 					<Switch>
-						<Match when={mode() === MODE_MY_TICKET}>
-							<MyTicketView />
+						<Match when={mode() === MODE_INVITE}>
+							<InviteFriendView onInviteGenerated={() => {}} />
 						</Match>
-						<Match when={mode() === MODE_ADD_FRIEND}>
-							<AddFriendView onSaved={() => {}} />
+						<Match when={mode() === MODE_JOIN}>
+							<JoinFriendView onJoined={() => {}} />
 						</Match>
 						<Match when={mode() === MODE_FRIEND && currentFriend()}>
 							<div class="contact-info">

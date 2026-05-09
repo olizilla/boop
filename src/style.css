@@ -80,6 +80,20 @@ body {
 	z-index: 10;
 }
 
+#screen::after {
+	content: " ";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: 0;
+	bottom: 0;
+	right: 0;
+	background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+	z-index: 11;
+	background-size: 100% 4px, 6px 100%;
+	pointer-events: none;
+}
+
 #header {
 	display: flex;
 	justify-content: space-between;
@@ -254,17 +268,19 @@ h1 {
 }
 
 /* Input Views */
-#view-add-friend, #view-my-ticket {
+#view-add-friend, #view-my-ticket, #view-invite-friend, #view-join-friend {
 	display: flex;
 	flex-direction: column;
 	align-items: center;
-	gap: 10px;
+	gap: 12px;
 	width: 100%;
 }
 
-#view-add-friend h2, #view-my-ticket h2 {
+#view-invite-friend h2, #view-join-friend h2 {
 	font-size: 12px;
-	margin-bottom: 10px;
+	margin-bottom: 5px;
+	color: var(--text-main);
+	text-transform: uppercase;
 }
 
 input, textarea {
@@ -297,14 +313,64 @@ button[id^="btn-save"]:active, button[id^="btn-copy"]:active {
 	transform: scale(0.95);
 }
 
-#my-ticket-display {
+#invite-ticket-display, #my-ticket-display {
 	font-size: 8px;
 	word-wrap: break-word;
 	word-break: break-all;
 	width: 90%;
-	margin: 10px 0;
+	margin: 10px auto;
 	line-height: 1.4;
 	color: var(--text-dim);
-	max-height: 100px;
+	max-height: 80px;
 	overflow-y: auto;
+	background: rgba(0,0,0,0.3);
+	padding: 10px;
+	border: 1px dashed var(--text-dim);
 }
+
+.invite-form, .join-form {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+}
+
+.invite-form p, .join-form p, .invite-success p {
+	font-size: 8px;
+	line-height: 1.5;
+	margin-bottom: 5px;
+	color: var(--text-dim);
+}
+
+.invite-actions {
+	display: flex;
+	gap: 10px;
+	justify-content: center;
+}
+
+button[id^="btn-generate"], button[id^="btn-join"], .invite-actions button {
+	background: var(--text-dim);
+	color: var(--screen-bg);
+	border: none;
+	font-family: inherit;
+	font-size: 8px;
+	padding: 10px 12px;
+	cursor: pointer;
+}
+
+button.secondary {
+	background: transparent;
+	border: 1px solid var(--text-dim);
+	color: var(--text-dim);
+}
+
+button:disabled {
+	opacity: 0.3;
+	cursor: not-allowed;
+}
+
+button:not(:disabled):hover {
+	filter: brightness(1.2);
+}
+
