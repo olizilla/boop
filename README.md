@@ -10,9 +10,9 @@ We once had copper wires between every home, and if we were bored at home, we'd 
 ## Cosy stack
 
 Friends that made this possible:
-- **[Iroh](https://iroh.computer/)**: Fancy peer-to-peer networkinging magic.
+- **[Iroh](https://iroh.computer/)**: Fancy peer-to-peer networkinging.
 - **[Tauri](https://tauri.app/)**: The app wrap that lets us use the web platform for our UI.
-- **[Rodio](https://github.com/RustAudio/rodio)**: Native Rust audio playback for maximum reliability.
+- **[Rodio](https://github.com/RustAudio/rodio)**: rust audio beebop.
 
 ## How it Works:
 
