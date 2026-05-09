@@ -60,10 +60,18 @@ async fn get_my_endpoint(state: State<'_, Arc<AppState>>) -> Result<String, Stri
 }
 
 #[tauri::command]
-async fn add_friend(state: State<'_, Arc<AppState>>, nickname: String, endpoint_id: String) -> Result<uuid::Uuid, String> {
-    log::info!("Adding friend {} via endpoint: {}", nickname, endpoint_id);
-    let ep = endpoint_id.parse::<boop_core::iroh::PublicKey>().map_err(|e| e.to_string())?;
-    state.engine.add_friend(nickname, ep).await.map_err(|e| e.to_string())
+async fn generate_invite(state: State<'_, Arc<AppState>>, pet_name: String) -> Result<String, String> {
+    log::info!("Generating invite for pet name: {}", pet_name);
+    let ticket = state.engine.generate_invite(pet_name).await.map_err(|e| e.to_string())?;
+    Ok(ticket.to_string())
+}
+
+#[tauri::command]
+async fn accept_invite(state: State<'_, Arc<AppState>>, ticket_str: String, nickname: String) -> Result<uuid::Uuid, String> {
+    log::info!("Accepting invite from {}", nickname);
+    use std::str::FromStr;
+    let ticket = boop_core::InviteTicket::from_str(&ticket_str).map_err(|e: boop_core::iroh_tickets::ParseError| e.to_string())?;
+    state.engine.accept_invite(ticket, nickname).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -180,10 +188,18 @@ pub fn run() {
                 let iroh_dir = data_dir.join("iroh");
                 let address_book_path = data_dir.join("friends.json");
                 
-                let (iroh, rx) = IrohManager::new(iroh_dir, false).await.expect("failed to init iroh");
+                let address_book = if address_book_path.exists() {
+                    let json = tokio::fs::read_to_string(&address_book_path).await.unwrap_or_default();
+                    serde_json::from_str(&json).unwrap_or_else(|_| boop_core::address_book::AddressBook::new())
+                } else {
+                    boop_core::address_book::AddressBook::new()
+                };
+                let address_book = Arc::new(tokio::sync::Mutex::new(address_book));
+
+                let (iroh, rx) = IrohManager::new(iroh_dir, false, address_book.clone()).await.expect("failed to init iroh");
                 
                 let player = Arc::new(TauriBoopPlayer);
-                let engine = BoopEngine::new(iroh, address_book_path, rx, player).await.expect("Failed to create engine");
+                let engine = BoopEngine::new(iroh, address_book_path, address_book, rx, player).await.expect("Failed to create engine");
                 let event_rx = engine.event_tx.subscribe();
                 (engine, event_rx)
             });
@@ -204,7 +220,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_my_endpoint,
-            add_friend,
+            generate_invite,
+            accept_invite,
             send_boop,
             play_boop,
             get_audio_bytes,

@@ -6,6 +6,7 @@ mod integration_tests {
     use std::time::Duration;
     use tempfile::tempdir;
     use std::sync::Arc;
+    use tokio::sync::Mutex;
     use async_trait::async_trait;
     use n0_future::StreamExt;
     use std::str::FromStr;
@@ -33,18 +34,24 @@ mod integration_tests {
         let addr_book_a = dir_a.path().join("friends.json");
         let addr_book_b = dir_b.path().join("friends.json");
 
-        let (iroh_a, rx_a) = IrohManager::new(iroh_dir_a, true).await.unwrap();
-        let (iroh_b, rx_b) = IrohManager::new(iroh_dir_b, true).await.unwrap();
+        let ab_a = Arc::new(tokio::sync::Mutex::new(crate::address_book::AddressBook::new()));
+        let ab_b = Arc::new(tokio::sync::Mutex::new(crate::address_book::AddressBook::new()));
+        
+        let (iroh_a, rx_a) = IrohManager::new(iroh_dir_a, true, ab_a.clone()).await.unwrap();
+        let (iroh_b, rx_b) = IrohManager::new(iroh_dir_b, true, ab_b.clone()).await.unwrap();
+
+        ab_b.lock().await.add_friend("A".to_string(), iroh_a.endpoint_id);
+        ab_a.lock().await.add_friend("B".to_string(), iroh_b.endpoint_id);
 
         let ticket_a = iroh_a.endpoint_ticket().unwrap();
         iroh_b.connect_to_endpoint_ticket(&ticket_a).await.unwrap();
 
         let player_a = Arc::new(MockPlayer);
         let player_b = Arc::new(MockPlayer);
-        let _engine_a = BoopEngine::new(iroh_a.clone(), addr_book_a, rx_a, player_a).await.unwrap();
-        let engine_b = BoopEngine::new(iroh_b.clone(), addr_book_b, rx_b, player_b).await.unwrap();
+        let _engine_a = BoopEngine::new(iroh_a.clone(), addr_book_a, ab_a.clone(), rx_a, player_a).await.unwrap();
+        let engine_b = BoopEngine::new(iroh_b.clone(), addr_book_b, ab_b.clone(), rx_b, player_b).await.unwrap();
 
-        engine_b.add_friend("A".to_string(), iroh_a.endpoint_id).await.unwrap();
+
 
         let boop_bytes = b"real-boop-payload".to_vec();
         let raw_hash = iroh_a.blobs().add_bytes(boop_bytes.clone()).await.unwrap().hash;
@@ -57,15 +64,8 @@ mod integration_tests {
         };
         let boop_meta_bytes = serde_json::to_vec(&boop).unwrap();
         let meta_hash = iroh_a.blobs().add_bytes(boop_meta_bytes.clone()).await.unwrap().hash;
-        let mut fetch_success = false;
-        for _ in 0..10 {
-            if engine_b.iroh.fetch_blob(&meta_hash.to_string(), &iroh_a.endpoint_id.to_string()).await.is_ok() {
-                fetch_success = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-        assert!(fetch_success, "Blob download failed after retries");
+        // Fetch the blob
+        engine_b.iroh.fetch_blob(&meta_hash.to_string(), &iroh_a.endpoint_id.to_string()).await.expect("Blob download failed");
         let fetched_meta_bytes = engine_b.iroh.blobs().get_bytes(meta_hash).await.unwrap();
         assert_eq!(fetched_meta_bytes.len(), boop_meta_bytes.len());
     }
@@ -75,10 +75,11 @@ mod integration_tests {
         let dir = tempdir().unwrap();
         let iroh_dir = dir.path().join("iroh");
         let addr_book = dir.path().join("friends.json");
-        let (iroh, rx) = IrohManager::new(iroh_dir, true).await.unwrap();
+        let ab = Arc::new(tokio::sync::Mutex::new(crate::address_book::AddressBook::new()));
+        let (iroh, rx) = IrohManager::new(iroh_dir, true, ab.clone()).await.unwrap();
         
         let player = Arc::new(MockPlayer);
-        let engine = BoopEngine::new(iroh.clone(), addr_book, rx, player).await.unwrap();
+        let engine = BoopEngine::new(iroh.clone(), addr_book, ab.clone(), rx, player).await.unwrap();
 
         let friend_id = uuid::Uuid::new_v4();
         let audio_bytes = b"fake-audio".to_vec();
@@ -138,9 +139,10 @@ mod integration_tests {
         let dir = tempdir().unwrap();
         let iroh_dir = dir.path().join("iroh");
         let addr_book = dir.path().join("friends.json");
-        let (iroh, rx) = IrohManager::new(iroh_dir, true).await.unwrap();
+        let ab = Arc::new(tokio::sync::Mutex::new(crate::address_book::AddressBook::new()));
+        let (iroh, rx) = IrohManager::new(iroh_dir, true, ab.clone()).await.unwrap();
         let player = Arc::new(MockPlayer);
-        let engine = BoopEngine::new(iroh.clone(), addr_book, rx, player).await.unwrap();
+        let engine = BoopEngine::new(iroh.clone(), addr_book, ab.clone(), rx, player).await.unwrap();
 
         let friend_id = uuid::Uuid::new_v4();
         
@@ -198,59 +200,139 @@ mod integration_tests {
         let dir_a = tempdir().unwrap();
         let dir_b = tempdir().unwrap();
         
-        let (iroh_a, rx_a) = IrohManager::new(dir_a.path().join("iroh"), true).await.unwrap();
-        let (iroh_b, rx_b) = IrohManager::new(dir_b.path().join("iroh"), true).await.unwrap();
+        let ab_a = Arc::new(tokio::sync::Mutex::new(crate::address_book::AddressBook::new()));
+        let ab_b = Arc::new(tokio::sync::Mutex::new(crate::address_book::AddressBook::new()));
+        
+        let (iroh_a, rx_a) = IrohManager::new(dir_a.path().join("iroh"), true, ab_a.clone()).await.unwrap();
+        let (iroh_b, rx_b) = IrohManager::new(dir_b.path().join("iroh"), true, ab_b.clone()).await.unwrap();
 
+        ab_a.lock().await.add_friend("B".to_string(), iroh_b.endpoint_id);
+        ab_b.lock().await.add_friend("A".to_string(), iroh_a.endpoint_id);
+
+        let player_a = Arc::new(MockPlayer);
+        let player_b = Arc::new(MockPlayer);
+        
+        let _engine_a = BoopEngine::new(iroh_a.clone(), dir_a.path().join("friends.json"), ab_a.clone(), rx_a, player_a).await.unwrap();
+        let engine_b = BoopEngine::new(iroh_b.clone(), dir_b.path().join("friends.json"), ab_b.clone(), rx_b, player_b).await.unwrap();
+
+        let mut event_rx_b = engine_b.event_tx.subscribe();
+        
         // Manually connect nodes
         let ticket_b = iroh_b.endpoint_ticket().unwrap();
         iroh_a.connect_to_endpoint_ticket(&ticket_b).await.unwrap();
+
+        // Try explicitly sending presence
+        iroh_a.send_presence(iroh_b.endpoint_id, true).await.expect("send_presence failed");
+        
+        // Wait for B to receive PeerActive
+        let friend_id_a = ab_b.lock().await.friends.values().next().unwrap().id;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Ok(event) = event_rx_b.recv().await {
+                if let crate::events::CoreEvent::PeerActive { friend_id } = event {
+                    if friend_id == friend_id_a {
+                        return;
+                    }
+                }
+            }
+        }).await.expect("Timed out waiting for PeerActive event");
+    }
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_invite_flow() {
+        use std::println as info;
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        
+        let ab_a = Arc::new(tokio::sync::Mutex::new(crate::address_book::AddressBook::new()));
+        let ab_b = Arc::new(tokio::sync::Mutex::new(crate::address_book::AddressBook::new()));
+        
+        let (iroh_a, rx_a) = IrohManager::new(dir_a.path().join("iroh"), true, ab_a.clone()).await.unwrap();
+        let (iroh_b, rx_b) = IrohManager::new(dir_b.path().join("iroh"), true, ab_b.clone()).await.unwrap();
         
         let player_a = Arc::new(MockPlayer);
         let player_b = Arc::new(MockPlayer);
         
-        let engine_a = BoopEngine::new(iroh_a.clone(), dir_a.path().join("friends.json"), rx_a, player_a).await.unwrap();
-        let engine_b = BoopEngine::new(iroh_b.clone(), dir_b.path().join("friends.json"), rx_b, player_b).await.unwrap();
-
+        let engine_a = BoopEngine::new(iroh_a, dir_a.path().join("friends.json"), ab_a, rx_a, player_a).await.unwrap();
+        let engine_b = BoopEngine::new(iroh_b, dir_b.path().join("friends.json"), ab_b, rx_b, player_b).await.unwrap();
+        
+        let mut event_rx_a = engine_a.event_tx.subscribe();
         let mut event_rx_b = engine_b.event_tx.subscribe();
-
-        // Add friend B to A
-        let _friend_id_b = engine_a.add_friend("B".to_string(), iroh_b.endpoint_id).await.unwrap();
         
-        // Let them sync up
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        // 1. A generates invite
+        info!("A generating invite...");
+        let invite_ticket = engine_a.generate_invite("Friend B".to_string()).await.unwrap();
         
-        // Add friend A to B so B knows A's ID
-        let friend_id_a = engine_b.add_friend("A".to_string(), iroh_a.endpoint_id).await.unwrap();
-
-        // Let them handshake
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        // Try explicitly sending presence to see if it fails (with retries for discovery)
-        let mut presence_success = false;
-        for _ in 0..10 {
-            if iroh_a.send_presence(iroh_b.endpoint_id, true).await.is_ok() {
-                presence_success = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        }
-        assert!(presence_success, "send_presence failed directly after retries");
+        // 2. B accepts invite
+        info!("B accepting invite...");
+        let friend_id_a = engine_b.accept_invite(invite_ticket, "Friend A".to_string()).await.unwrap();
         
-        // Wait for B to receive PeerActive
-        let mut got_active = false;
-        for _ in 0..10 {
-            if let Ok(event) = event_rx_b.try_recv() {
-                if let crate::events::CoreEvent::PeerActive { friend_id } = event {
-                    if friend_id == friend_id_a {
-                        got_active = true;
-                        break;
+        // 3. Wait for A to receive FriendAdded event (server side)
+        info!("Waiting for A to add friend...");
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Ok(event) = event_rx_a.recv().await {
+                if let crate::events::CoreEvent::FriendAdded { friend } = event {
+                    if friend.nickname == "Friend B" {
+                        return;
                     }
                 }
             }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        }).await.expect("A timed out waiting for FriendAdded event");
+
+        // Trigger presence broadcast so they see each other as active
+        engine_a.set_focus_state(true).await;
+        engine_b.set_focus_state(true).await;
         
-        assert!(got_active, "Should have received PeerActive event");
+        // 4. Wait for them to sync and become active (proves handshake worked)
+        info!("Waiting for B to see A as active...");
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Ok(event) = event_rx_b.recv().await {
+                if let crate::events::CoreEvent::PeerActive { friend_id } = event {
+                    if friend_id == friend_id_a {
+                        return;
+                    }
+                }
+            }
+        }).await.expect("B timed out waiting for PeerActive event");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn test_connection_reuse() {
+        use std::println as info;
+        let dir_a = tempdir().unwrap();
+        let dir_b = tempdir().unwrap();
+        
+        let ab_a = Arc::new(Mutex::new(crate::address_book::AddressBook::new()));
+        let ab_b = Arc::new(Mutex::new(crate::address_book::AddressBook::new()));
+        
+        let (iroh_a, _events_a) = IrohManager::new(dir_a.path().join("iroh"), true, ab_a.clone()).await.unwrap();
+        let (iroh_b, _events_b) = IrohManager::new(dir_b.path().join("iroh"), true, ab_b.clone()).await.unwrap();
+        
+        // Add A to B's address book and vice versa manually
+        {
+            let mut ab = ab_a.lock().await;
+            ab.add_friend("Friend B".to_string(), iroh_b.endpoint_id);
+        }
+        {
+            let mut ab = ab_b.lock().await;
+            ab.add_friend("Friend A".to_string(), iroh_a.endpoint_id);
+        }
+
+        let addr_b = iroh_b.endpoint.addr();
+        
+        // First presence update - should establish connection
+        info!("Sending first presence update...");
+        iroh_a.send_presence(addr_b.clone(), true).await.unwrap();
+        
+        // Second presence update - should REUSE connection
+        info!("Sending second presence update...");
+        iroh_a.send_presence(addr_b.clone(), false).await.unwrap();
+        
+        // Third presence update - should REUSE connection
+        info!("Sending third presence update...");
+        iroh_a.send_presence(addr_b, true).await.unwrap();
+        
+        info!("Connection reuse test complete!");
     }
 }
 

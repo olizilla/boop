@@ -9,14 +9,26 @@ pub struct Friend {
 	pub doc_ticket: Option<String>, // The negotiated iroh-docs ticket of the shared queue
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Invite {
+	pub token: [u8; 32],
+	pub pet_name: String,
+	pub created_at: u64,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct AddressBook {
 	pub friends: std::collections::HashMap<iroh::PublicKey, Friend>,
+	#[serde(default)]
+	pub pending_invites: std::collections::HashMap<String, Invite>, // base64/hex token string as key
 }
 
 impl AddressBook {
 	pub fn new() -> Self {
-		Self { friends: std::collections::HashMap::new() }
+		Self { 
+			friends: std::collections::HashMap::new(),
+			pending_invites: std::collections::HashMap::new(),
+		}
 	}
 
 	pub fn add_friend(&mut self, nickname: String, endpoint_id: iroh::PublicKey) -> uuid::Uuid {

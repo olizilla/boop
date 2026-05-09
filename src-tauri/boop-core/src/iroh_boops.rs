@@ -56,7 +56,6 @@ impl BoopQueue {
 		let doc = match ticket {
 			None => iroh.docs().create().await?,
 			Some(t) => {
-				println!("TRYING TO PARSE TICKET: '{}'", t);
 				let ticket = DocTicket::from_str(&t)?;
 				iroh.docs().import(ticket).await?
 			}
@@ -147,8 +146,7 @@ impl BoopQueue {
 
 			if tombstones.contains(&boop.id.to_string()) && entry.author() == self.author {
 				// The recipient listened to it! Delete the doc entry.
-				log::info!("Garbage collecting boop {} due to tombstone", boop.id);
-				self.doc.del(self.author, entry.key().to_vec()).await.ok();
+				self.gc_entry(&boop.id, &entry).await;
 			} else if !boop.is_listened && entry.author() != self.author {
 				let is_ready = self.iroh.blobs().has(boop.blob_hash).await.unwrap_or(false);
 				log::debug!("Boop {}: audio blob {} presence: {}", boop.id, boop.blob_hash, is_ready);
@@ -214,10 +212,15 @@ impl BoopQueue {
 			let Ok(boop) = Boop::from_bytes(b) else { continue; };
 
 			if tombstones.contains(&boop.id.to_string()) && entry.author() == self.author {
-				self.doc.del(self.author, entry.key().to_vec()).await.ok();
+				self.gc_entry(&boop.id, &entry).await;
 			}
 		}
 		Ok(())
+	}
+
+	async fn gc_entry(&self, id: &uuid::Uuid, entry: &iroh_docs::Entry) {
+		log::info!("Garbage collecting boop {} due to tombstone", id);
+		self.doc.del(self.author, entry.key().to_vec()).await.ok();
 	}
 
 	#[cfg(test)]
