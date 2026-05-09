@@ -295,7 +295,13 @@ impl BoopEngine {
                 let iroh = self.iroh.clone();
                 let ep = friend.endpoint_id;
                 tokio::spawn(async move {
-                    let _ = iroh.dial_friend(ep, dt).await;
+                    for attempt in 1..=5 {
+                        if iroh.dial_friend(ep, dt.clone()).await.is_ok() {
+                            log::info!("Successfully robust-dialed friend {} on attempt {}", ep, attempt);
+                            break;
+                        }
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    }
                 });
             }
         }
@@ -315,7 +321,16 @@ impl BoopEngine {
             let iroh = self.iroh.clone();
             let ep = friend.endpoint_id;
             tokio::spawn(async move {
-                let _ = iroh.send_presence(ep, is_focused).await;
+                for _attempt in 1..=5 {
+                    if iroh.send_presence(ep, is_focused).await.is_ok() {
+                        break;
+                    }
+                    if !is_focused {
+                        // Don't retry on blur
+                        break;
+                    }
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                }
             });
         }
     }
