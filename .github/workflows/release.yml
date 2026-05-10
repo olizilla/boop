@@ -9,18 +9,17 @@ jobs:
   release:
     permissions:
       contents: write
-    # fail-fast: false ensures that if one platform fails, the others still finish.
-    # This is useful for debugging and partial releases.
     strategy:
       fail-fast: false
       matrix:
         include:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
-          - platform: 'ubuntu-22.04'
-            args: '--target aarch64-unknown-linux-gnu'
-            use-cross: true
           - platform: 'windows-latest'
+            args: ''
+          - platform: 'ubuntu-latest' # Standard x86_64
+            args: ''
+          - platform: 'ubuntu-24.04-arm' # Native ARM64
             args: ''
 
     runs-on: ${{ matrix.platform }}
@@ -37,28 +36,26 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: stable
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || matrix.platform == 'ubuntu-22.04' && 'aarch64-unknown-linux-gnu' || '' }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
-      - name: install dependencies (ubuntu only)
-        if: matrix.platform == 'ubuntu-22.04'
+      - name: Rust cache
+        uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: "src-tauri -> target"
+
+      - name: install dependencies (linux only)
+        if: contains(matrix.platform, 'ubuntu')
         run: |
-          # Reuse local setup script for core tauri/audio deps
           bash scripts/setup.sh --system-only
-          # Add ARM64 cross-compilation tools specifically for CI
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu patchelf
-
-      - name: install frontend dependencies
-        run: npm install
 
       - name: build and release
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__ # tauri-action will replace __VERSION__ with the version from tauri.conf.json
+          tagName: v__VERSION__
           releaseName: "Boop v__VERSION__"
           releaseBody: "Cosy P2P voice notes."
           releaseDraft: true
           prerelease: true
           args: ${{ matrix.args }}
-          useCross: ${{ matrix.use-cross || false }}
