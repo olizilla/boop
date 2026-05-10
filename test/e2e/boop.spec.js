@@ -6,7 +6,9 @@ test.describe('Boop E2E Recording Flow', () => {
     page.on('pageerror', error => console.log('PAGE ERROR:', error.message));
 
     // 1. Visit the app
+    const listenerReady = page.waitForEvent('console', msg => msg.text().includes('Subscribed to core-event'));
     await page.goto('/');
+    await listenerReady;
 
     // 2. The mock initial state handles stateSnapshot automatically after frontend_ready.
     // It creates 0 friends by default, so we expect the "Invite Friend" UI.
@@ -69,8 +71,12 @@ test.describe('Boop E2E Recording Flow', () => {
 
   test('Playback flow for received boops', async ({ page }) => {
     // 1. Visit the app
+    const listenerReady = page.waitForEvent('console', msg => msg.text().includes('Subscribed to core-event'));
     await page.goto('/');
-    await expect(page.locator('#arcade-cabinet')).toBeVisible(); // Wait for hydration
+    await listenerReady;
+    await expect(page.locator('#arcade-cabinet')).toBeVisible(); 
+    // Wait for the default mock state to settle (0 friends -> Invite view)
+    await expect(page.locator('#view-invite-friend')).toBeVisible();
 
     const mockFriendId = "7ebd0062-1234-4567-8901-abcdef123456";
     const mockBoopId = "boop-1234-5678";
