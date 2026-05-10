@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "setup": "bash scripts/setup.sh",
-    "version": "node scripts/sync-version.js && git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/boop-core/Cargo.toml",
+    "version": "node scripts/sync-version.js && git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/boop-core/Cargo.toml src-tauri/Cargo.lock",
     "icon": "node scripts/generate-icon.js && tauri icon app_icon.svg && rm app_icon.svg"
   },
   "devDependencies": {
