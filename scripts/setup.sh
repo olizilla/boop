@@ -113,8 +113,12 @@ elif [ "${MACHINE}" == "Mac" ]; then
 fi
 
 # 4. Project Dependencies
-echo -e "${GREEN}Installing Node dependencies...${NC}"
-npm install
+if [[ "$*" == *"--system-only"* ]]; then
+    echo -e "${YELLOW}Skipping Node dependencies as requested by --system-only${NC}"
+else
+    echo -e "${GREEN}Installing Node dependencies...${NC}"
+    npm install
+fi
 
 echo -e "${GREEN}Setup complete! You can now run the app with:${NC}"
 echo -e "${YELLOW}npm run tauri dev${NC}"

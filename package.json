@@ -1,6 +1,6 @@
 {
   "name": "boop",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "license": "GPL-3.0",
   "type": "module",
@@ -10,7 +10,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "setup": "bash scripts/setup.sh"
+    "setup": "bash scripts/setup.sh",
+    "version": "node scripts/sync-version.js && git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/boop-core/Cargo.toml",
+    "icon": "node scripts/generate-icon.js && tauri icon app_icon.svg && rm app_icon.svg"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
