@@ -20,7 +20,7 @@ Friends that made this possible:
 1. create an invite code and send it to a friend to connect.
 2. record a voice note in the UI, a boop, encoded as a WAV.
 3. the boop is passed to the Rust backend and transcoded to FLAC to take up less space.
-4. a hash of the boop is shared with your friend via []`iroh-docs`](https://docs.iroh.computer/protocols/documents#documents).
+4. a hash of the boop is shared with your friend via [`iroh-docs`](https://docs.iroh.computer/protocols/documents#documents).
 5. your friend fetches the audio driectly from you using the hash and [`iroh-blobs`](https://docs.iroh.computer/protocols/blobs).
 6. they send a "listened" receipt, and both boopers delete the audio to keep things neat.
 7. if they chillin, they might boop you back.
@@ -29,13 +29,16 @@ More detail in the [Boop Sync doc](docs/boop_sync-design.md)
 
 ## Development
 
-To get started with Boop, ensure you have Node.js and Rust installed, then run the setup script to install system dependencies and project packages:
+With Node.js and Rust installed, use `npm` to install the dependencies.
 
 ```bash
+npm install
+
+# on linux, run setup to fetch needed OS deps like `libwebkit2gtk-4.1-dev` etc.
 npm run setup
 ```
 
-To run the application locally, you can use `npm run tauri dev`. You can even isolate local instances using environment variables to test P2P connections on the same machine!
+Use `npm run tauri dev` to run the application locally. Isolate multiple local instances using BOOP_DATA_DIR env var.
 
 ```bash
 # Run Instance A
