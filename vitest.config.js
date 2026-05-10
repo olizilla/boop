@@ -7,6 +7,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['node_modules/@testing-library/jest-dom/vitest'],
+    exclude: ['test/e2e/**', 'node_modules/**', 'dist/**', '.git/**', '.cache/**'],
     deps: {
       optimizer: {
         web: {

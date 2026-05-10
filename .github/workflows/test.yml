@@ -1,0 +1,46 @@
+name: "Tests"
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - '*.js'
+      - '*.json'
+      - 'test/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - '*.js'
+      - '*.json'
+      - 'test/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v4
+
+      - name: setup node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v4
+        with:
+          node-version: lts/*
+          cache: 'npm'
+
+      - name: install deps
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: install playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: run tests
+        run: npm run test
