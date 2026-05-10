@@ -68,9 +68,9 @@ test.describe('Boop E2E Recording Flow', () => {
   });
 
   test('Playback flow for received boops', async ({ page }) => {
-    // 1. Visit the app and wait for hydration
+    // 1. Visit the app
     await page.goto('/');
-    await page.waitForTimeout(500); // Wait for onMount to settle
+    await expect(page.locator('#arcade-cabinet')).toBeVisible(); // Wait for hydration
 
     const mockFriendId = "7ebd0062-1234-4567-8901-abcdef123456";
     const mockBoopId = "boop-1234-5678";

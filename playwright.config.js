@@ -5,7 +5,7 @@ export default defineConfig({
   fullyParallel: true,
   reporter: 'list',
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:4173',
     trace: 'on-first-retry',
     launchOptions: {
       args: [
@@ -14,9 +14,15 @@ export default defineConfig({
       ]
     }
   },
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
   webServer: {
-    command: 'npm run dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: true,
+    command: 'npm run build && npm run preview',
+    url: 'http://localhost:4173',
+    reuseExistingServer: !process.env.CI,
   },
 });
