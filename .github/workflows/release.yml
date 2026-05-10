@@ -43,8 +43,11 @@ jobs:
         with:
           workspaces: "src-tauri -> target"
 
-      - name: install dependencies (linux only)
-        if: contains(matrix.platform, 'ubuntu')
+      - name: install deps
+        run: npm ci
+
+      - name: install OS deps
+        if: contains(matrix.platform, 'ubuntu') || contains(matrix.platform, 'macos')
         run: |
           bash scripts/setup.sh --system-only
 

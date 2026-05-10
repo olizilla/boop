@@ -54,7 +54,8 @@ if ! command -v npm &> /dev/null; then
     echo -e "${RED}Error: npm is not installed.${NC}"
     exit 1
 else
-    echo -e "${GREEN}✓ npm detected${NC}"
+    NPM_VER=$(npm -v)
+    echo -e "${GREEN}✓ npm v${NPM_VER} detected${NC}"
 fi
 
 # Rust check

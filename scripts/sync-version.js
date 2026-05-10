@@ -35,4 +35,16 @@ const updateCargoToml = (filePath) => {
 updateCargoToml(path.join(rootDir, 'src-tauri', 'Cargo.toml'));
 updateCargoToml(path.join(rootDir, 'src-tauri', 'boop-core', 'Cargo.toml'));
 
+// 4. Update Cargo.lock
+import { execSync } from 'child_process';
+console.log('- Updating Cargo.lock...');
+try {
+    const tauriDir = path.join(rootDir, 'src-tauri');
+    execSync('cargo update -p app', { cwd: tauriDir });
+    execSync('cargo update -p boop-core', { cwd: tauriDir });
+    console.log('- Updated src-tauri/Cargo.lock');
+} catch (err) {
+    console.error('Failed to update Cargo.lock:', err.message);
+}
+
 console.log('Version sync complete.');
