@@ -10,8 +10,7 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
-    "windows": [
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }

@@ -3,6 +3,9 @@ name = "boop-core"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0"
+description = "Core P2P networking for Boop"
+authors = ["olizilla"]
+repository = "https://github.com/olizilla/boop"
 
 [dependencies]
 iroh = { version = "1.0.0-rc.0", features = ["test-utils"] }

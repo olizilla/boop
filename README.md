@@ -1,4 +1,5 @@
 # Boop
+
 A cosy peer-to-peer voice note booper.
 
 No cloud, no accounts. Boop lets share voice messages with a friend, from your computer to theirs.
@@ -16,14 +17,15 @@ Friends that made this possible:
 
 ## How it Works:
 
-1. you record a voice note in the UI, a boop, encoded as a WAV.
-2. the boop is passed to the Rust backend and transcoded to FLAC to take up less space.
-3. a hash of the boop is shared with your friend via `iroh-docs`.
-4. your friend fetches the audio from you using the hash and `iroh-blobs`.
-5. they send a "listened" receipt, and both boopers delete the audio to keep things neat.
-6. if they chillin too, they might boop you back.
+1. create an invite code and send it to a friend to connect.
+2. record a voice note in the UI, a boop, encoded as a WAV.
+3. the boop is passed to the Rust backend and transcoded to FLAC to take up less space.
+4. a hash of the boop is shared with your friend via []`iroh-docs`](https://docs.iroh.computer/protocols/documents#documents).
+5. your friend fetches the audio driectly from you using the hash and [`iroh-blobs`](https://docs.iroh.computer/protocols/blobs).
+6. they send a "listened" receipt, and both boopers delete the audio to keep things neat.
+7. if they chillin, they might boop you back.
 
-More detail in the [Boop Sync doc](docs/boop_blob_sync_design.md)
+More detail in the [Boop Sync doc](docs/boop_sync-design.md)
 
 ## Development
 
@@ -42,3 +44,15 @@ npm run tauri dev
 # Run Instance B alongside it natively on custom local paths
 BOOP_DATA_DIR=/tmp/boop_b npm run tauri dev
 ```
+
+## Deployment
+
+Create a semver version tag and push it to github.
+A draft release with installers for linux, mac and windows is created automatically.
+
+```bash
+npm version patch
+git push origin main --tags
+```
+
+👉☎️👈
