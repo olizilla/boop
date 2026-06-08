@@ -1,0 +1,7 @@
+# .dockerignore for Boop Docker builds
+node_modules
+target
+src-tauri/target
+dist
+.git
+.github

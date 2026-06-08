@@ -1,0 +1,52 @@
+# Dockerfile.linux
+# Multi-purpose Dockerfile to compile, test, and package Boop for Linux (ARM64 or x86_64).
+
+FROM ubuntu:22.04
+
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install core bootstrapping tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    sudo \
+    gnupg \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs
+
+# Install Rust toolchain
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /workspace
+
+# Copy package lock and config files first to cache dependencies
+COPY package*.json ./
+COPY src-tauri/Cargo.* ./src-tauri/
+COPY src-tauri/boop-core/Cargo.toml ./src-tauri/boop-core/
+
+# Copy the rest of the source code
+COPY . .
+
+# Install system dependencies via our setup script
+RUN bash scripts/setup.sh --system-only \
+    && apt-get update && apt-get install -y xvfb dbus-x11
+
+# Install node dependencies
+RUN npm ci
+
+# Run unit tests to verify codebase health
+RUN npm run test:unit
+
+# Build the frontend and compile/bundle the Tauri application
+RUN npm run build \
+    && npx tauri build --bundles deb,appimage
+
+# Run our dependency alignment audit and launch smoke tests as a sanity check
+RUN node scripts/check-deps.js \
+    && ./scripts/audit-system-deps.sh \
+    && ./scripts/smoke-test.sh

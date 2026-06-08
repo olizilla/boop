@@ -17,9 +17,9 @@ jobs:
             args: '--target aarch64-apple-darwin'
           - platform: 'windows-latest'
             args: ''
-          - platform: 'ubuntu-latest' # Standard x86_64
+          - platform: 'ubuntu-22.04' # Standard x86_64
             args: ''
-          - platform: 'ubuntu-24.04-arm' # Native ARM64
+          - platform: 'ubuntu-22.04-arm' # Native ARM64
             args: ''
 
     runs-on: ${{ matrix.platform }}

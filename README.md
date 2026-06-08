@@ -27,6 +27,21 @@ Friends that made this possible:
 
 More detail in the [Boop Sync doc](docs/boop_sync-design.md)
 
+## Running on mac
+
+_macOS complains the app is "damaged" and should be moved to the trash._
+
+This app isn't signed yet. An Apple developer license costs $99/yr. So for now it's gonna throw an error on mac that we need to work around. You can right click on the app and choose open to side step the error:
+
+1. Drag **Boop** to your **Applications** folder.
+2. **right-click** (or Control-click) `Boop.app`, and choose **Open**.
+3. Click **Open** on the confirmation dialog to whitelist the app.
+
+To tell macOS to take Boop.app off the naughty list run this in Terminal.app:
+```bash
+xattr -cr /Applications/Boop.app
+```
+
 ## Development
 
 With Node.js and Rust installed, use `npm` to install the dependencies.

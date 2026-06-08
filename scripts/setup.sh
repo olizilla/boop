@@ -90,6 +90,8 @@ if [ "${MACHINE}" == "Linux" ]; then
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libasound2-dev \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
             gstreamer1.0-plugins-bad \
             gstreamer1.0-pulseaudio \
             gstreamer1.0-tools

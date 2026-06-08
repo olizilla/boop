@@ -8,11 +8,13 @@
     "test": "npm run test:unit && npm run test:e2e",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
+    "test:release": "bash scripts/smoke-test-all.sh",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "setup": "bash scripts/setup.sh",
+    "check-deps": "node scripts/check-deps.js",
     "version": "node scripts/sync-version.js && git add src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/boop-core/Cargo.toml src-tauri/Cargo.lock",
     "icon": "node scripts/generate-icon.js && tauri icon app_icon.svg && rm app_icon.svg"
   },
